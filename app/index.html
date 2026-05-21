@@ -72,6 +72,8 @@
   }
   progress::-webkit-progress-bar { background: rgba(255,255,255,.18); border-radius: 3px; }
   progress::-webkit-progress-value { background: #fff; }
+  .row-progress { margin-top: 8px; height: 4px; }
+  .row-progress::-webkit-progress-value { background: var(--accent); }
 
   .status { color: var(--muted); font-size: 12px; text-align: center; margin: 10px 0; min-height: 16px; }
   .input-row {
@@ -323,20 +325,42 @@ function renderModels() {
     const row = document.createElement('div');
     row.className = 'model-row' + (active ? ' active' : '');
     const mb = (n) => Math.round(n / 1048576);
+    const pct = (have, total) => total > 0 ? Math.round(100 * have / total) : 0;
     let action = '';
     if (active && m.downloaded) action = '<button class="primary muted">Active</button>';
     else if (m.downloaded) action = `<button class="primary" data-use="${m.id}">Use this</button>`;
     else if (downloading) action = '<button class="primary muted">Downloading…</button>';
+    else if ((m.partialBytes || 0) > 1_000_000) action = `<button class="primary" data-download="${m.id}">Resume download</button>`;
     else action = `<button class="primary" data-download="${m.id}">Download</button>`;
 
-    const delBtn = (!active && m.downloaded) ? `<button class="danger" data-delete="${m.id}">Delete</button>` : '';
+    const delBtn = (!active && (m.downloaded || (m.partialBytes || 0) > 0))
+      ? `<button class="danger" data-delete="${m.id}">${m.downloaded ? 'Delete' : 'Clear partial'}</button>`
+      : '';
+
+    // Storage status line — shows downloaded, partial, or not-yet-started
+    let storageLine;
+    if (m.downloaded) {
+      storageLine = `on disk: ${mb(m.onDiskBytes)} MB`;
+    } else if ((m.partialBytes || 0) > 0) {
+      const p = pct(m.partialBytes, m.sizeBytes);
+      storageLine = `partial: ${mb(m.partialBytes)} / ${mb(m.sizeBytes)} MB (${p}%) · resumable`;
+    } else {
+      storageLine = 'not downloaded';
+    }
+
+    // Live progress bar if this model is actively downloading
+    const progressBar = downloading
+      ? `<progress class="row-progress" value="0" max="1" data-progress-for="${m.id}"></progress>
+         <div class="meta" data-progress-stats-for="${m.id}">starting…</div>`
+      : '';
 
     row.innerHTML = `
       <div style="display:flex">
         <div style="flex:1">
           <div style="font-weight:600">${m.name}${active ? '<span class="check">✓ active</span>' : ''}</div>
           <div class="meta">${m.tagline}</div>
-          <div class="meta">${mb(m.sizeBytes)} MB${m.downloaded ? ` · on disk: ${mb(m.onDiskBytes)} MB` : ' · not downloaded'}</div>
+          <div class="meta">${mb(m.sizeBytes)} MB · ${storageLine}</div>
+          ${progressBar}
         </div>
       </div>
       <div class="actions">${action}${delBtn}</div>`;
@@ -378,12 +402,19 @@ on('onGenerationError', (p) => { $('model-text').textContent = 'Error: ' + p.mes
 on('onMicGranted', () => { $('status').textContent = 'Mic granted.'; });
 on('onMicDenied', () => { $('status').textContent = 'Mic denied. Open app settings.'; });
 on('onDownloadProgress', (p) => {
+  // Main chat-screen download banner
   $('dl-bar').value = p.ratio;
   const mb = (n) => Math.round(n / 1048576);
   const kb = (n) => Math.round(n / 1024);
   let stats = `${mb(p.bytesRead)} / ${mb(p.bytesTotal)} MB · ${kb(p.speedBytesPerSec)} KB/s · ${Math.round(p.ratio*100)}%`;
   if (p.attempt > 1) stats += ` · retry ${p.attempt}/${p.maxAttempts}`;
   $('dl-stats').textContent = stats;
+
+  // Per-row progress bar in settings (if rendered)
+  const bar = document.querySelector(`[data-progress-for="${p.modelId}"]`);
+  if (bar) bar.value = p.ratio;
+  const rowStats = document.querySelector(`[data-progress-stats-for="${p.modelId}"]`);
+  if (rowStats) rowStats.textContent = stats;
 });
 on('onDownloadDone', () => refresh());
 on('onDownloadFailed', () => refresh());
