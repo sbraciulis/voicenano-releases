@@ -1,6 +1,6 @@
 {
-  "versionCode": 5,
-  "versionName": "0.5",
+  "versionCode": 6,
+  "versionName": "0.6",
   "apkUrl": "https://github.com/sbraciulis/voicenano-releases/releases/latest/download/voicenano.apk",
-  "notes": "Moved OTA backend to GitHub Releases. Switched default model to Qwen 2.5 0.5B (521 MB) hosted on GitHub which actually honors HTTP Range — resume finally works."
+  "notes": "Model picker (Qwen 2.5 0.5B / 1.5B). Text input field alongside the mic. Speak-responses toggle for text-only output. New Settings screen (gear icon)."
 }
