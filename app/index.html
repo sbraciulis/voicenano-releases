@@ -351,18 +351,14 @@
 <!-- ── Code/Terminal screen ───────────────────────────────────────── -->
 <main id="code" class="screen hidden">
   <div class="code-toolbar">
+    <select id="lang-select" aria-label="Language">
+      <option value="js">JavaScript</option>
+      <option value="py">Python</option>
+    </select>
     <button id="run-code">▶ Run</button>
     <button id="stop-code" class="stop hidden">■ Stop</button>
     <button id="clear-terminal" class="ghost">Clear output</button>
-    <select id="example-select" aria-label="Examples">
-      <option value="">Examples…</option>
-      <option value="hello">Hello, world</option>
-      <option value="math">Math: 2+2 squared</option>
-      <option value="fibonacci">Fibonacci(20)</option>
-      <option value="fetch">Fetch JSON (httpbin)</option>
-      <option value="dom">Draw to off-screen canvas</option>
-      <option value="async">Async / setTimeout</option>
-    </select>
+    <select id="example-select" aria-label="Examples"></select>
     <button id="send-code-ai" class="ghost">Ask AI →</button>
   </div>
   <div class="code-area">
@@ -751,61 +747,77 @@ function switchScreen(name) {
 }
 
 // ── Code runner (sandboxed iframe) ────────────────────────────────
-const CODE_KEY = 'voicenano:code:v1';
+const CODE_KEY = (lang) => `voicenano:code:${lang}:v1`;
+const LANG_KEY = 'voicenano:lang:v1';
+
 const EXAMPLES = {
-  hello: `console.log('Hello, world');
-return 'done';
-`,
-  math: `const x = 2 + 2;
-const y = x ** 2;
-console.log('2 + 2 =', x, ', squared =', y);
-return y;
-`,
-  fibonacci: `function fib(n) {
-  let [a, b] = [0n, 1n];
-  for (let i = 0; i < n; i++) [a, b] = [b, a + b];
-  return a;
-}
-const out = [];
-for (let i = 0; i <= 20; i++) out.push(fib(i).toString());
-console.log(out.join(', '));
-return fib(20).toString();
-`,
-  fetch: `const r = await fetch('https://httpbin.org/json');
-const j = await r.json();
-console.log(JSON.stringify(j, null, 2));
-return j.slideshow?.title || 'no title';
-`,
-  dom: `const c = new OffscreenCanvas(120, 60);
-const ctx = c.getContext('2d');
-ctx.fillStyle = '#ffd778';
-ctx.fillRect(10, 10, 100, 40);
-ctx.fillStyle = '#000';
-ctx.font = '14px sans-serif';
-ctx.fillText('Drew a rect', 18, 36);
-const blob = await c.convertToBlob();
-console.log('canvas blob size:', blob.size, 'bytes');
-return 'rendered ' + c.width + 'x' + c.height;
-`,
-  async: `console.log('start');
-await new Promise(r => setTimeout(r, 600));
-console.log('after 600ms');
-await new Promise(r => setTimeout(r, 400));
-console.log('after another 400ms');
-return 'awaited 1 second total';
-`,
+  js: {
+    hello: `console.log('Hello, world');\nreturn 'done';\n`,
+    math: `const x = 2 + 2;\nconst y = x ** 2;\nconsole.log('2 + 2 =', x, ', squared =', y);\nreturn y;\n`,
+    fibonacci: `function fib(n) {\n  let [a, b] = [0n, 1n];\n  for (let i = 0; i < n; i++) [a, b] = [b, a + b];\n  return a;\n}\nconst out = [];\nfor (let i = 0; i <= 20; i++) out.push(fib(i).toString());\nconsole.log(out.join(', '));\nreturn fib(20).toString();\n`,
+    fetch: `const r = await fetch('https://httpbin.org/json');\nconst j = await r.json();\nconsole.log(JSON.stringify(j, null, 2));\nreturn j.slideshow?.title || 'no title';\n`,
+    dom: `const c = new OffscreenCanvas(120, 60);\nconst ctx = c.getContext('2d');\nctx.fillStyle = '#ffd778';\nctx.fillRect(10, 10, 100, 40);\nctx.fillStyle = '#000';\nctx.font = '14px sans-serif';\nctx.fillText('Drew a rect', 18, 36);\nconst blob = await c.convertToBlob();\nconsole.log('canvas blob size:', blob.size, 'bytes');\nreturn 'rendered ' + c.width + 'x' + c.height;\n`,
+    async: `console.log('start');\nawait new Promise(r => setTimeout(r, 600));\nconsole.log('after 600ms');\nawait new Promise(r => setTimeout(r, 400));\nconsole.log('after another 400ms');\nreturn 'awaited 1 second total';\n`,
+  },
+  py: {
+    hello: `print("Hello, world")\n"done"\n`,
+    math: `x = 2 + 2\ny = x ** 2\nprint(f"2 + 2 = {x}, squared = {y}")\ny\n`,
+    fibonacci: `def fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n\nprint(", ".join(str(fib(i)) for i in range(21)))\nfib(20)\n`,
+    listcomp: `nums = [i * i for i in range(10) if i % 2 == 0]\nprint(nums)\nsum(nums)\n`,
+    json: `import json\ndata = {"hello": "world", "values": [1, 2, 3]}\ntext = json.dumps(data, indent=2)\nprint(text)\nlen(text)\n`,
+    classes: `class Counter:\n    def __init__(self): self.n = 0\n    def inc(self): self.n += 1; return self.n\n\nc = Counter()\nfor _ in range(5): print("tick", c.inc())\nc.n\n`,
+  },
 };
 
-// Restore last code from localStorage
-try {
-  const saved = localStorage.getItem(CODE_KEY);
-  if (saved) $('code-input').value = saved;
-} catch {}
-$('code-input').addEventListener('input', () => {
-  try { localStorage.setItem(CODE_KEY, $('code-input').value); } catch {}
+const EXAMPLE_LABELS = {
+  js: { hello: 'Hello, world', math: 'Math: 2+2 squared', fibonacci: 'Fibonacci(20)', fetch: 'Fetch JSON (httpbin)', dom: 'Draw to off-screen canvas', async: 'Async / setTimeout' },
+  py: { hello: 'Hello, world', math: 'Math: 2+2 squared', fibonacci: 'Fibonacci(20)', listcomp: 'List comprehension', json: 'JSON encoding', classes: 'Class + state' },
+};
+
+let currentLang = localStorage.getItem(LANG_KEY) || 'js';
+
+function loadCodeForLang() {
+  try {
+    const saved = localStorage.getItem(CODE_KEY(currentLang));
+    if (saved !== null) $('code-input').value = saved;
+    else if (EXAMPLES[currentLang]?.hello) $('code-input').value = EXAMPLES[currentLang].hello;
+  } catch {}
+}
+
+function refreshExampleDropdown() {
+  const sel = $('example-select');
+  sel.innerHTML = '<option value="">Examples…</option>';
+  for (const [k, label] of Object.entries(EXAMPLE_LABELS[currentLang] || {})) {
+    const opt = document.createElement('option');
+    opt.value = k; opt.textContent = label;
+    sel.appendChild(opt);
+  }
+}
+
+$('lang-select').value = currentLang;
+refreshExampleDropdown();
+loadCodeForLang();
+
+$('lang-select').addEventListener('change', (e) => {
+  currentLang = e.target.value;
+  localStorage.setItem(LANG_KEY, currentLang);
+  refreshExampleDropdown();
+  loadCodeForLang();
+  $('code-input').placeholder = currentLang === 'py'
+    ? '# Python via Pyodide (WebAssembly).\n# First run downloads the runtime (~5 MB), then it stays cached.\n\nprint("Hello from Python")'
+    : '// JavaScript. Tap ▶ Run to execute.\n\nconsole.log("Hello from JS")';
 });
 
-let codeFrame = null;
+$('code-input').addEventListener('input', () => {
+  try { localStorage.setItem(CODE_KEY(currentLang), $('code-input').value); } catch {}
+});
+
+// JS runs in a fresh iframe each time (cheap to create).
+// Python runs in a persistent iframe with Pyodide loaded once (heavy).
+let jsFrame = null;
+let pyFrame = null;
+let pyReady = false;
+let pyHandler = null;
 
 function termAppend(level, text) {
   const term = $('terminal');
@@ -816,27 +828,33 @@ function termAppend(level, text) {
   term.scrollTop = term.scrollHeight;
 }
 
-function clearTerminal() {
-  $('terminal').innerHTML = '';
+function clearTerminal() { $('terminal').innerHTML = ''; }
+
+function setRunningUI(running) {
+  $('run-code').classList.toggle('hidden', running);
+  $('stop-code').classList.toggle('hidden', !running);
 }
 
 function stopCode() {
-  if (codeFrame) {
-    try { codeFrame.remove(); } catch {}
-    codeFrame = null;
-    termAppend('done', '── stopped ──');
-    $('run-code').classList.remove('hidden');
-    $('stop-code').classList.add('hidden');
-  }
+  if (jsFrame) { try { jsFrame.remove(); } catch {} jsFrame = null; }
+  // Python iframe is persistent — we don't tear it down on stop.
+  termAppend('done', '── stopped ──');
+  setRunningUI(false);
 }
 
 function runCode() {
   const code = $('code-input').value;
   if (!code.trim()) return;
-  stopCode();
   clearTerminal();
-  termAppend('prompt', '▶ run');
+  termAppend('prompt', currentLang === 'py' ? '▶ python' : '▶ js');
+  setRunningUI(true);
+  if (currentLang === 'py') runPython(code);
+  else                      runJavaScript(code);
+}
 
+// ── JavaScript runner ──────────────────────────────────────────────
+function runJavaScript(code) {
+  if (jsFrame) { try { jsFrame.remove(); } catch {} jsFrame = null; }
   const harness = `
     <!doctype html><html><body><script>
       function fmt(a) {
@@ -848,10 +866,8 @@ function runCode() {
       }
       function send(type, level, text) { parent.postMessage({ type, level, text }, '*'); }
       const make = (level) => (...a) => send('log', level, a.map(fmt).join(' '));
-      console.log   = make('log');
-      console.info  = make('info');
-      console.warn  = make('warn');
-      console.error = make('error');
+      console.log = make('log'); console.info = make('info');
+      console.warn = make('warn'); console.error = make('error');
       window.onerror = (msg, src, line, col, err) => {
         send('log', 'err', (err && err.stack) ? err.stack : (msg + ' at ' + line + ':' + col));
         return true;
@@ -861,10 +877,9 @@ function runCode() {
       });
       window.addEventListener('message', async (e) => {
         if (e.data && e.data.type === 'exec') {
-          const src = e.data.code;
           try {
             const AsyncFn = (async function(){}).constructor;
-            const fn = new AsyncFn(src);
+            const fn = new AsyncFn(e.data.code);
             const result = await fn();
             send('done', 'result', result === undefined ? '(no return value)' : fmt(result));
           } catch (err) {
@@ -874,34 +889,105 @@ function runCode() {
       });
       parent.postMessage({ type: 'ready' }, '*');
     <\/script></body></html>`;
-
-  codeFrame = document.createElement('iframe');
-  codeFrame.style.display = 'none';
-  codeFrame.setAttribute('sandbox', 'allow-scripts');
-  codeFrame.srcdoc = harness;
-  document.body.appendChild(codeFrame);
+  jsFrame = document.createElement('iframe');
+  jsFrame.style.display = 'none';
+  jsFrame.setAttribute('sandbox', 'allow-scripts');
+  jsFrame.srcdoc = harness;
+  document.body.appendChild(jsFrame);
 
   const handler = (ev) => {
-    if (ev.source !== codeFrame?.contentWindow) return;
+    if (ev.source !== jsFrame?.contentWindow) return;
     const m = ev.data;
-    if (m.type === 'ready') {
-      codeFrame.contentWindow.postMessage({ type: 'exec', code }, '*');
-    } else if (m.type === 'log') {
-      termAppend(m.level, m.text);
-    } else if (m.type === 'done') {
+    if (m.type === 'ready') jsFrame.contentWindow.postMessage({ type: 'exec', code }, '*');
+    else if (m.type === 'log')  termAppend(m.level, m.text);
+    else if (m.type === 'done') {
       if (m.level === 'err') termAppend('err', m.text);
       else termAppend('result', '← ' + m.text);
       termAppend('done', '── done ──');
       window.removeEventListener('message', handler);
-      try { codeFrame.remove(); } catch {}
-      codeFrame = null;
-      $('run-code').classList.remove('hidden');
-      $('stop-code').classList.add('hidden');
+      try { jsFrame.remove(); } catch {}
+      jsFrame = null;
+      setRunningUI(false);
     }
   };
   window.addEventListener('message', handler);
-  $('run-code').classList.add('hidden');
-  $('stop-code').classList.remove('hidden');
+}
+
+// ── Python runner (Pyodide) ────────────────────────────────────────
+const PYODIDE_VERSION = 'v0.26.4';
+const PYODIDE_INDEX = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VERSION}/full/`;
+
+function ensurePyFrame() {
+  if (pyFrame) return;
+  const harness = `
+    <!doctype html><html><head>
+      <script src="${PYODIDE_INDEX}pyodide.js"><\/script>
+    </head><body><script>
+      let pyodide;
+      const send = (type, level, text) => parent.postMessage({ type, level, text }, '*');
+      async function init() {
+        try {
+          send('log', 'info', 'Loading Pyodide ${PYODIDE_VERSION} runtime…');
+          pyodide = await loadPyodide({
+            indexURL: '${PYODIDE_INDEX}',
+            stdout: (s) => send('log', 'log', s),
+            stderr: (s) => send('log', 'err', s),
+          });
+          send('ready', '', '');
+        } catch (err) {
+          send('done', 'err', 'Failed to load Pyodide: ' + (err && err.message || err));
+        }
+      }
+      init();
+      window.addEventListener('message', async (e) => {
+        if (!pyodide) { send('done', 'err', 'Pyodide not ready yet.'); return; }
+        if (e.data && e.data.type === 'exec') {
+          try {
+            const result = await pyodide.runPythonAsync(e.data.code);
+            let text;
+            if (result === undefined || result === null) text = '(no return value)';
+            else { try { text = String(result.toString ? result.toString() : result); } catch { text = String(result); } }
+            send('done', 'result', text);
+          } catch (err) {
+            send('done', 'err', err.message || String(err));
+          }
+        }
+      });
+    <\/script></body></html>`;
+  pyFrame = document.createElement('iframe');
+  pyFrame.style.display = 'none';
+  // Pyodide loads WASM; sandbox allow-scripts is sufficient.
+  pyFrame.setAttribute('sandbox', 'allow-scripts');
+  pyFrame.srcdoc = harness;
+  document.body.appendChild(pyFrame);
+}
+
+function runPython(code) {
+  ensurePyFrame();
+  if (pyHandler) window.removeEventListener('message', pyHandler);
+  pyHandler = (ev) => {
+    if (ev.source !== pyFrame?.contentWindow) return;
+    const m = ev.data;
+    if (m.type === 'log') termAppend(m.level, m.text);
+    else if (m.type === 'ready') {
+      if (!pyReady) {
+        pyReady = true;
+        termAppend('info', 'Pyodide ready. Executing…');
+      }
+      pyFrame.contentWindow.postMessage({ type: 'exec', code }, '*');
+    } else if (m.type === 'done') {
+      if (m.level === 'err') termAppend('err', m.text);
+      else termAppend('result', '← ' + m.text);
+      termAppend('done', '── done ──');
+      setRunningUI(false);
+    }
+  };
+  window.addEventListener('message', pyHandler);
+  if (pyReady) {
+    pyFrame.contentWindow.postMessage({ type: 'exec', code }, '*');
+  } else {
+    termAppend('info', 'Python first run — fetching Pyodide (~5 MB). This takes 5–20s.');
+  }
 }
 
 $('run-code').onclick = runCode;
