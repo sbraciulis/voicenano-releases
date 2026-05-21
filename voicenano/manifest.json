@@ -1,6 +1,6 @@
 {
-  "versionCode": 9,
-  "versionName": "0.9",
+  "versionCode": 10,
+  "versionName": "1.0",
   "apkUrl": "https://github.com/sbraciulis/voicenano-releases/releases/latest/download/voicenano.apk",
-  "notes": "Settings now shows partial download bytes for each model. If a model is half-downloaded the row shows 'partial: 223 / 1495 MB (15%) · resumable' and the action button becomes 'Resume download'. Per-row progress bar appears live while downloading."
+  "notes": "Fixes Qwen 2.5 1.5B load failure. Now tries GPU → CPU → default LiteRT backends so newer-signature models work. MediaPipe bumped to 0.10.24."
 }
