@@ -1,6 +1,6 @@
 {
-  "versionCode": 11,
-  "versionName": "1.1",
+  "versionCode": 12,
+  "versionName": "1.2",
   "apkUrl": "https://github.com/sbraciulis/voicenano-releases/releases/latest/download/voicenano.apk",
-  "notes": "Faster model load. CPU backend by default (~10s vs ~30s for GPU). Backend choice now persists per model, so subsequent launches go straight to the known-working backend. New Settings → Inference backend selector for power users who want GPU. Lower maxTokens for less memory pressure."
+  "notes": "Streaming generation: text now appears token-by-token. Live tok/s indicator in the status line. Each completed message records its tok/s and token count, shown under the bubble timestamp."
 }
