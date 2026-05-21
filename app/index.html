@@ -25,7 +25,14 @@
     font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     overflow: hidden;
   }
-  body { display: flex; flex-direction: column; }
+  body {
+    display: flex; flex-direction: column;
+    /* Respect Android display cutouts / status bar / gesture bar */
+    padding-top: env(safe-area-inset-top, 0);
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    padding-left: env(safe-area-inset-left, 0);
+    padding-right: env(safe-area-inset-right, 0);
+  }
   .screen {
     flex: 1; min-height: 0; overflow-y: auto;
     padding: 14px 18px 24px; display: flex; flex-direction: column;
@@ -33,7 +40,7 @@
   .screen.hidden { display: none; }
   header {
     display: grid; grid-template-columns: 40px 1fr 40px;
-    align-items: center; padding: 14px 4px 6px;
+    align-items: center; padding: 18px 8px 8px;
   }
   header .title { text-align: center; color: var(--accent); font-size: 22px; font-weight: 700; }
   header .sub { text-align: center; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
@@ -252,6 +259,8 @@ window.NativeEvents = {
 
 // ── State ────────────────────────────────────────────────────────────
 let state = null;
+/** Most-recent download progress per model id, so re-renders don't reset the bar. */
+const lastProgress = new Map();
 function refresh() {
   try { state = JSON.parse(Native.getState()); applyState(); } catch (e) { console.error(e); }
 }
@@ -348,10 +357,14 @@ function renderModels() {
       storageLine = 'not downloaded';
     }
 
-    // Live progress bar if this model is actively downloading
+    // Live progress bar if this model is actively downloading.
+    // Use the cached last-known progress so re-renders don't flicker back to 0.
+    const cached = lastProgress.get(m.id);
+    const initialRatio = cached?.ratio ?? 0;
+    const initialStats = cached?.stats ?? 'starting…';
     const progressBar = downloading
-      ? `<progress class="row-progress" value="0" max="1" data-progress-for="${m.id}"></progress>
-         <div class="meta" data-progress-stats-for="${m.id}">starting…</div>`
+      ? `<progress class="row-progress" value="${initialRatio}" max="1" data-progress-for="${m.id}"></progress>
+         <div class="meta" data-progress-stats-for="${m.id}">${initialStats}</div>`
       : '';
 
     row.innerHTML = `
@@ -402,12 +415,15 @@ on('onGenerationError', (p) => { $('model-text').textContent = 'Error: ' + p.mes
 on('onMicGranted', () => { $('status').textContent = 'Mic granted.'; });
 on('onMicDenied', () => { $('status').textContent = 'Mic denied. Open app settings.'; });
 on('onDownloadProgress', (p) => {
-  // Main chat-screen download banner
-  $('dl-bar').value = p.ratio;
   const mb = (n) => Math.round(n / 1048576);
   const kb = (n) => Math.round(n / 1024);
   let stats = `${mb(p.bytesRead)} / ${mb(p.bytesTotal)} MB · ${kb(p.speedBytesPerSec)} KB/s · ${Math.round(p.ratio*100)}%`;
   if (p.attempt > 1) stats += ` · retry ${p.attempt}/${p.maxAttempts}`;
+  // Cache for re-renders, so the bar value persists across state pushes
+  lastProgress.set(p.modelId, { ratio: p.ratio, stats });
+
+  // Main chat-screen download banner
+  $('dl-bar').value = p.ratio;
   $('dl-stats').textContent = stats;
 
   // Per-row progress bar in settings (if rendered)
@@ -416,6 +432,8 @@ on('onDownloadProgress', (p) => {
   const rowStats = document.querySelector(`[data-progress-stats-for="${p.modelId}"]`);
   if (rowStats) rowStats.textContent = stats;
 });
+on('onDownloadDone', (p) => { lastProgress.delete(p.modelId); refresh(); });
+on('onDownloadFailed', (p) => { lastProgress.delete(p.modelId); refresh(); });
 on('onDownloadDone', () => refresh());
 on('onDownloadFailed', () => refresh());
 on('onModelReady', () => refresh());
