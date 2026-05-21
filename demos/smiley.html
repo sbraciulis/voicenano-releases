@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Tilt Smiley</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: radial-gradient(circle at 50% 30%, #2a3550, #0f1626 70%);
+    color: #cfd8e3;
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+  }
+  .wrap {
+    position: fixed; inset: 0;
+    display: grid; grid-template-rows: 1fr auto;
+  }
+  .stage {
+    display: grid; place-items: center;
+  }
+  svg { width: min(80vmin, 480px); height: min(80vmin, 480px); }
+  .hud {
+    padding: 14px 18px 22px; text-align: center;
+  }
+  .hud .row { display: flex; justify-content: space-around; opacity: 0.75; font-variant-numeric: tabular-nums; }
+  .hud .row span b { color: #ffd778; font-weight: 600; }
+  .start {
+    margin: 0 auto; display: inline-block;
+    background: #ffb347; color: #1a1a1a;
+    padding: 12px 22px; border-radius: 999px; font-weight: 700;
+    border: none; cursor: pointer; font-size: 16px;
+    box-shadow: 0 4px 16px rgba(255,179,71,0.4);
+  }
+  .note { margin-top: 10px; opacity: 0.7; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage">
+    <svg id="face" viewBox="-120 -120 240 240" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="skin" cx="50%" cy="40%" r="60%">
+          <stop offset="0%" stop-color="#ffe488"/>
+          <stop offset="70%" stop-color="#ffd95c"/>
+          <stop offset="100%" stop-color="#e9b423"/>
+        </radialGradient>
+        <radialGradient id="cheek" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ff8a8a" stop-opacity="0.8"/>
+          <stop offset="100%" stop-color="#ff8a8a" stop-opacity="0"/>
+        </radialGradient>
+      </defs>
+
+      <!-- Head (rotates with roll) -->
+      <g id="head">
+        <circle r="100" fill="url(#skin)" stroke="#c68f10" stroke-width="3"/>
+
+        <!-- Cheeks (opacity depends on tilt) -->
+        <circle id="cheekL" cx="-55" cy="25" r="18" fill="url(#cheek)" opacity="0"/>
+        <circle id="cheekR" cx="55"  cy="25" r="18" fill="url(#cheek)" opacity="0"/>
+
+        <!-- Eyes (pupils translate) -->
+        <g id="eyeL">
+          <circle cx="-35" cy="-20" r="16" fill="#fff" stroke="#222" stroke-width="1.5"/>
+          <circle id="pupilL" cx="-35" cy="-20" r="7" fill="#222"/>
+          <circle cx="-32" cy="-23" r="2" fill="#fff"/>
+        </g>
+        <g id="eyeR">
+          <circle cx="35" cy="-20" r="16" fill="#fff" stroke="#222" stroke-width="1.5"/>
+          <circle id="pupilR" cx="35" cy="-20" r="7" fill="#222"/>
+          <circle cx="38" cy="-23" r="2" fill="#fff"/>
+        </g>
+
+        <!-- Eyebrows (raise with up-tilt) -->
+        <path id="browL" d="M -52,-44 Q -35,-50 -18,-44" stroke="#3a2a10" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path id="browR" d="M 18,-44 Q 35,-50 52,-44" stroke="#3a2a10" stroke-width="4" fill="none" stroke-linecap="round"/>
+
+        <!-- Mouth (curve depends on tilt) -->
+        <path id="mouth" d="M -38,40 Q 0,70 38,40" stroke="#3a2a10" stroke-width="6" fill="none" stroke-linecap="round"/>
+
+        <!-- Sweat drop (appears when tilted hard) -->
+        <g id="sweat" opacity="0">
+          <path d="M 70,-30 Q 80,-10 85,0 Q 80,10 70,8 Q 60,4 65,-10 Z" fill="#7ec8ff" stroke="#4a93cc" stroke-width="1.5"/>
+        </g>
+
+        <!-- Tongue (sticks out when face is upside-down) -->
+        <ellipse id="tongue" cx="0" cy="58" rx="0" ry="0" fill="#ff6f8b" stroke="#3a2a10" stroke-width="2"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="hud">
+    <button class="start" id="startBtn">Tap to enable motion</button>
+    <div id="readings" class="row" style="display:none">
+      <span>roll <b id="rollOut">0°</b></span>
+      <span>pitch <b id="pitchOut">0°</b></span>
+      <span>yaw <b id="yawOut">0°</b></span>
+    </div>
+    <div class="note" id="note">Hold phone upright. Tilt it around.</div>
+  </div>
+</div>
+
+<script>
+  const head    = document.getElementById('head');
+  const pupilL  = document.getElementById('pupilL');
+  const pupilR  = document.getElementById('pupilR');
+  const browL   = document.getElementById('browL');
+  const browR   = document.getElementById('browR');
+  const mouth   = document.getElementById('mouth');
+  const cheekL  = document.getElementById('cheekL');
+  const cheekR  = document.getElementById('cheekR');
+  const sweat   = document.getElementById('sweat');
+  const tongue  = document.getElementById('tongue');
+
+  const rollOut  = document.getElementById('rollOut');
+  const pitchOut = document.getElementById('pitchOut');
+  const yawOut   = document.getElementById('yawOut');
+  const readings = document.getElementById('readings');
+  const startBtn = document.getElementById('startBtn');
+  const note     = document.getElementById('note');
+
+  // Smoothed values
+  let sRoll = 0, sPitch = 0, sYaw = 0;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  function onOrientation(e) {
+    // gamma: left-right tilt (-90..90)
+    // beta:  front-back tilt (-180..180)
+    // alpha: compass yaw (0..360)
+    const roll  = e.gamma ?? 0;
+    const pitch = e.beta  ?? 0;
+    const yaw   = e.alpha ?? 0;
+
+    sRoll  = lerp(sRoll,  roll,  0.18);
+    sPitch = lerp(sPitch, pitch, 0.18);
+    sYaw   = lerp(sYaw,   yaw,   0.18);
+
+    render();
+    rollOut.textContent  = sRoll.toFixed(0)  + '°';
+    pitchOut.textContent = sPitch.toFixed(0) + '°';
+    yawOut.textContent   = sYaw.toFixed(0)   + '°';
+  }
+
+  function render() {
+    // Head rotates with roll (dampened so the eyes can still drift visibly)
+    head.setAttribute('transform', `rotate(${(-sRoll * 0.4).toFixed(2)})`);
+
+    // Pupils drift toward "down" relative to gravity
+    const px = clamp(sRoll * 0.08, -6, 6);
+    const py = clamp((sPitch - 60) * 0.06, -6, 6);
+    pupilL.setAttribute('cx', -35 + px);
+    pupilL.setAttribute('cy', -20 + py);
+    pupilR.setAttribute('cx',  35 + px);
+    pupilR.setAttribute('cy', -20 + py);
+
+    // Mouth: happy when phone is upright (~60° pitch typical hold), gets flatter / frowns when tilted hard
+    const tiltMag = Math.min(1, (Math.abs(sRoll) + Math.abs(sPitch - 60)) / 90);
+    const curve = lerp(30, -25, tiltMag); // +30 smile -> -25 frown
+    mouth.setAttribute('d', `M -38,40 Q 0,${40 + curve} 38,40`);
+
+    // Eyebrows raise with surprise (high pitch)
+    const browLift = clamp((sPitch - 60) * 0.15, -8, 12);
+    browL.setAttribute('transform', `translate(0, ${-browLift})`);
+    browR.setAttribute('transform', `translate(0, ${-browLift})`);
+
+    // Cheeks: appear with strong roll
+    const cheekOp = clamp((Math.abs(sRoll) - 25) / 40, 0, 0.9);
+    cheekL.setAttribute('opacity', cheekOp);
+    cheekR.setAttribute('opacity', cheekOp);
+
+    // Sweat drop: when tilted past 45° in either axis
+    const stress = clamp((Math.max(Math.abs(sRoll), Math.abs(sPitch - 60)) - 45) / 40, 0, 1);
+    sweat.setAttribute('opacity', stress);
+    sweat.setAttribute('transform', `translate(0, ${stress * 8})`);
+
+    // Tongue: pops out when face is upside down (pitch < -30 or > 150)
+    const upside = Math.abs(sPitch) > 130 ? 1 : 0;
+    const tx = upside ? 14 : 0, ty = upside ? 10 : 0;
+    tongue.setAttribute('rx', tx);
+    tongue.setAttribute('ry', ty);
+  }
+
+  async function enable() {
+    try {
+      // iOS 13+ permission prompt
+      if (typeof DeviceOrientationEvent !== 'undefined'
+          && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const state = await DeviceOrientationEvent.requestPermission();
+        if (state !== 'granted') { note.textContent = 'Motion permission denied.'; return; }
+      }
+      window.addEventListener('deviceorientation', onOrientation);
+      startBtn.style.display = 'none';
+      readings.style.display = 'flex';
+      note.textContent = 'Tilt your phone. Try flipping it upside down.';
+    } catch (err) {
+      note.textContent = 'Motion not available: ' + err.message;
+    }
+  }
+
+  startBtn.addEventListener('click', enable);
+
+  // Desktop fallback: follow mouse so you can preview on a laptop
+  if (!('ontouchstart' in window) && !navigator.maxTouchPoints) {
+    startBtn.textContent = 'Move your mouse (desktop preview)';
+    document.addEventListener('mousemove', (e) => {
+      const x = (e.clientX / innerWidth - 0.5) * 2;  // -1..1
+      const y = (e.clientY / innerHeight - 0.5) * 2;
+      onOrientation({ gamma: x * 45, beta: 60 + y * 60, alpha: 0 });
+    });
+    readings.style.display = 'flex';
+    note.textContent = 'Desktop preview - move your mouse.';
+  }
+</script>
+</body>
+</html>

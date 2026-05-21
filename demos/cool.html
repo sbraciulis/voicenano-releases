@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>cool</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#000; touch-action:none;
+                color:#cfd8e3; font:13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+                -webkit-user-select:none; user-select:none; }
+  canvas { display:block; width:100%; height:100%; }
+  .hint  { position:fixed; bottom:18px; left:0; right:0; text-align:center;
+           color:#ffffff99; font-size:12px; pointer-events:none; letter-spacing:.5px; }
+  .pill  { position:fixed; top:14px; left:50%; transform:translateX(-50%);
+           background:#ffffff14; padding:6px 12px; border-radius:999px;
+           font-size:11px; font-variant-numeric:tabular-nums; color:#fff8;
+           pointer-events:none; }
+  .start { position:fixed; inset:0; display:grid; place-items:center;
+           background:radial-gradient(circle at 50% 40%, #2a3550, #000 70%);
+           font-size:18px; cursor:pointer; }
+  .start b { color:#FFD778; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="pill" id="hud">tilt gravity · 0 particles</div>
+<div class="hint">touch &amp; drag to paint · double-tap to clear</div>
+<div class="start" id="start"><div style="text-align:center"><b>tap to begin</b><br><span style="opacity:.6;font-size:13px">(grants motion access on iOS)</span></div></div>
+
+<script>
+const c   = document.getElementById('c');
+const ctx = c.getContext('2d');
+const hud = document.getElementById('hud');
+const start = document.getElementById('start');
+
+let W, H, gx = 0, gy = 0.32;
+let pointerDown = false;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  c.width  = W * dpr; c.height = H * dpr;
+  c.style.width  = W + 'px'; c.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+const particles = [];
+const MAX = 1200;
+
+class P {
+  constructor(x, y, hue) {
+    this.x = x; this.y = y;
+    this.vx = (Math.random()-.5) * 5;
+    this.vy = (Math.random()-.5) * 5 - 1;
+    this.hue = hue;
+    this.life = 1;
+    this.size = 2 + Math.random() * 3.5;
+    this.trail = [];
+  }
+  step() {
+    this.vx += gx;  this.vy += gy;
+    this.vx *= .991; this.vy *= .991;
+    this.x  += this.vx; this.y += this.vy;
+    if (this.x < this.size) { this.x = this.size; this.vx *= -.72; }
+    if (this.x > W - this.size) { this.x = W - this.size; this.vx *= -.72; }
+    if (this.y < this.size) { this.y = this.size; this.vy *= -.72; }
+    if (this.y > H - this.size) { this.y = H - this.size; this.vy *= -.72; }
+    this.life *= .9985;
+    this.trail.push(this.x, this.y);
+    if (this.trail.length > 22) { this.trail.shift(); this.trail.shift(); }
+  }
+  draw() {
+    // trail
+    for (let i = 0; i < this.trail.length; i += 2) {
+      const t = i / this.trail.length;
+      ctx.fillStyle = `hsla(${this.hue + i}, 95%, 62%, ${t * this.life * .75})`;
+      ctx.beginPath();
+      ctx.arc(this.trail[i], this.trail[i+1], this.size * t, 0, 6.283);
+      ctx.fill();
+    }
+    // head with glow
+    ctx.shadowColor = `hsl(${this.hue}, 100%, 70%)`;
+    ctx.shadowBlur = 16;
+    ctx.fillStyle  = `hsl(${this.hue}, 100%, 72%)`;
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, 6.283);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+
+function spawn(x, y, n) {
+  const baseHue = (Date.now() / 30) % 360;
+  n = n || (pointerDown ? 4 : 18);
+  for (let i = 0; i < n; i++) {
+    particles.push(new P(x + (Math.random()-.5)*10, y + (Math.random()-.5)*10,
+                         baseHue + Math.random()*70));
+  }
+  if (particles.length > MAX) particles.splice(0, particles.length - MAX);
+}
+
+function frame() {
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  ctx.fillRect(0, 0, W, H);
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.step(); p.draw();
+    if (p.life < 0.04) particles.splice(i, 1);
+  }
+  hud.textContent =
+    `gx ${gx.toFixed(2)}  gy ${gy.toFixed(2)}  ·  ${particles.length} particles`;
+  requestAnimationFrame(frame);
+}
+frame();
+
+// auto-spawn so the screen is never empty
+setInterval(() => {
+  if (particles.length < 80) spawn(Math.random()*W, Math.random()*H, 14);
+}, 700);
+
+// pointer interaction
+let lastTap = 0;
+c.addEventListener('pointerdown', e => {
+  pointerDown = true;
+  const now = Date.now();
+  if (now - lastTap < 280) { particles.length = 0; }
+  lastTap = now;
+  spawn(e.clientX, e.clientY);
+});
+c.addEventListener('pointermove', e => {
+  if (pointerDown) spawn(e.clientX, e.clientY);
+});
+addEventListener('pointerup',     () => pointerDown = false);
+addEventListener('pointercancel', () => pointerDown = false);
+
+// gravity from device tilt
+function enableMotion() {
+  addEventListener('deviceorientation', (e) => {
+    gx = (e.gamma ?? 0) * 0.014;
+    gy = (((e.beta ?? 60) - 30)) * 0.014;
+  });
+}
+
+start.addEventListener('click', async () => {
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const state = await DeviceOrientationEvent.requestPermission();
+      if (state === 'granted') enableMotion();
+    } else {
+      enableMotion();
+    }
+  } catch (_) { /* desktop is fine without */ }
+  start.style.display = 'none';
+  // big initial burst
+  for (let i = 0; i < 8; i++) spawn(W/2 + (Math.random()-.5)*120,
+                                    H/2 + (Math.random()-.5)*120, 40);
+});
+</script>
+</body>
+</html>

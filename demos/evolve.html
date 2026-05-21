@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>evolve</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin:0; height:100%; overflow:hidden; background:#070a14; touch-action:none;
+               color:#cfd8e3; font:13px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+               -webkit-user-select:none; user-select:none; }
+  canvas { display:block; width:100%; height:100%; cursor:crosshair; }
+  .hud {
+    position:fixed; top:10px; left:10px; padding:10px 12px;
+    background:#000a; backdrop-filter: blur(8px);
+    border:1px solid #ffffff22; border-radius:10px; font-size:12px;
+    font-variant-numeric:tabular-nums; pointer-events:none; min-width:170px;
+  }
+  .hud b { color:#FFD778; }
+  .hud .row { display:flex; justify-content:space-between; gap:14px; margin:1px 0; }
+  .hud .row span:last-child { color:#fff; }
+  .hint {
+    position:fixed; bottom:14px; left:0; right:0; text-align:center;
+    color:#fff8; font-size:11px; pointer-events:none; letter-spacing:.4px;
+  }
+  .brain {
+    position:fixed; top:10px; right:10px; padding:10px;
+    background:#000a; backdrop-filter:blur(8px);
+    border:1px solid #ffffff22; border-radius:10px; font-size:11px;
+    pointer-events:none; max-width:240px; display:none;
+  }
+  .brain.show { display:block; }
+  .brain h4 { margin:0 0 6px; color:#FFD778; font-weight:600; font-size:11px; }
+  .brain canvas { width:220px; height:78px; background:#0a0e1a; border-radius:4px; }
+  .brain .meta { margin-top:6px; opacity:.8; }
+  .ctl {
+    position:fixed; bottom:50px; left:50%; transform:translateX(-50%);
+    display:flex; gap:8px; font-size:11px;
+  }
+  .ctl button {
+    background:#ffffff14; color:#fff; border:1px solid #ffffff22;
+    padding:6px 12px; border-radius:999px; cursor:pointer;
+  }
+  .ctl button:active { background:#ffffff28; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hud" id="hud">
+  <div class="row"><span>generation</span><b id="gen">0</b></div>
+  <div class="row"><span>alive</span><span id="alive">0</span></div>
+  <div class="row"><span>food</span><span id="food">0</span></div>
+  <div class="row"><span>best age</span><span id="age">0</span></div>
+  <div class="row"><span>best lineage</span><span id="line">0</span></div>
+  <div class="row"><span>avg eats/life</span><span id="eat">0</span></div>
+</div>
+
+<div class="brain" id="brain">
+  <h4>brain inspector</h4>
+  <canvas id="brainCanvas" width="220" height="78"></canvas>
+  <div class="meta">
+    energy <span id="bEnergy">–</span>  ·  age <span id="bAge">–</span><br>
+    eats <span id="bEats">–</span>  ·  gen <span id="bGen">–</span><br>
+    <span style="opacity:.6">tap empty space to drop food · tap an agent to inspect · long-press to spawn 5 random</span>
+  </div>
+</div>
+
+<div class="ctl">
+  <button id="btnSpeed">speed 1×</button>
+  <button id="btnReset">reset</button>
+  <button id="btnFood">+50 food</button>
+</div>
+
+<div class="hint">eat green to live. reproduce to spread your genes. watch them learn.</div>
+
+<script>
+// ── Setup ───────────────────────────────────────────────────────────
+const c   = document.getElementById('c');
+const ctx = c.getContext('2d');
+let W, H, DPR;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = innerWidth; H = innerHeight;
+  c.width  = W * DPR; c.height = H * DPR;
+  c.style.width = W + 'px'; c.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+addEventListener('resize', resize); resize();
+
+// ── Neural net ──────────────────────────────────────────────────────
+// inputs: [eyeL, eyeC, eyeR, energy01, bias]  (5)
+// hidden: 5  (tanh)
+// output: [thrust 0..1, turn -1..1]  (2, tanh)
+const N_IN = 5, N_HID = 5, N_OUT = 2;
+const N_W = N_IN * N_HID + N_HID * N_OUT;   // 35 weights
+
+function randomGenome(){
+  const g = new Float32Array(N_W);
+  for (let i = 0; i < N_W; i++) g[i] = (Math.random()*2 - 1) * 0.8;
+  return g;
+}
+function mutate(parent, rate=0.12, scale=0.35){
+  const g = new Float32Array(N_W);
+  for (let i = 0; i < N_W; i++){
+    g[i] = parent[i];
+    if (Math.random() < rate) {
+      // box-muller-ish small gaussian
+      g[i] += (Math.random() + Math.random() + Math.random() - 1.5) * scale;
+    }
+  }
+  return g;
+}
+function forward(g, inp){
+  // hidden = tanh(in · W1)
+  const hid = new Float32Array(N_HID);
+  for (let j = 0; j < N_HID; j++){
+    let s = 0;
+    for (let i = 0; i < N_IN; i++) s += inp[i] * g[i*N_HID + j];
+    hid[j] = Math.tanh(s);
+  }
+  // out = tanh(hid · W2)
+  const out = new Float32Array(N_OUT);
+  const W2 = N_IN*N_HID;
+  for (let k = 0; k < N_OUT; k++){
+    let s = 0;
+    for (let j = 0; j < N_HID; j++) s += hid[j] * g[W2 + j*N_OUT + k];
+    out[k] = Math.tanh(s);
+  }
+  return { hid, out };
+}
+
+// ── World state ─────────────────────────────────────────────────────
+const FOOD_CAP    = 220;
+const FOOD_SPAWN  = 1.4;     // per frame
+const POP_TARGET  = 60;      // re-seed if below
+const REPRO_E     = 78;
+const CHILD_E     = 30;
+const EAT_RADIUS  = 9;
+const SENSE_RANGE = 160;
+const FOV         = Math.PI * 0.85;
+
+let foods = [];
+let agents = [];
+let generation = 0;
+let bestAge = 0;
+let bestLineage = 0;
+let totalEats = 0;
+let totalLives = 0;
+let speed = 1;
+let selected = null;
+let lastInputs = null;
+
+function makeAgent(x, y, genome, gen=0, lineage=0){
+  return {
+    x, y,
+    heading: Math.random() * Math.PI * 2,
+    vx: 0, vy: 0,
+    energy: 50,
+    age: 0,
+    eats: 0,
+    gen,
+    lineage,
+    genome,
+    color: Math.floor((gen * 37 + lineage * 53) % 360),
+    radius: 4.5,
+  };
+}
+
+function reset(){
+  foods = [];
+  agents = [];
+  for (let i = 0; i < POP_TARGET; i++){
+    agents.push(makeAgent(Math.random()*W, Math.random()*H, randomGenome()));
+  }
+  for (let i = 0; i < 80; i++) foods.push({x: Math.random()*W, y: Math.random()*H, t: Math.random()});
+  generation = 0; bestAge = 0; bestLineage = 0; totalEats = 0; totalLives = 0;
+  selected = null;
+}
+reset();
+
+// ── Sensing ─────────────────────────────────────────────────────────
+// Three eye-cones (left/center/right). Returns 1/distance for nearest food in cone (0 if none).
+function sense(a){
+  const cones = [-FOV/3, 0, FOV/3];
+  const out = [0, 0, 0];
+  const cosFov = Math.cos(FOV/6);
+  for (let fi = 0; fi < foods.length; fi++){
+    const f = foods[fi];
+    let dx = f.x - a.x, dy = f.y - a.y;
+    // wrap toroidal — shortest path
+    if (dx >  W/2) dx -= W; else if (dx < -W/2) dx += W;
+    if (dy >  H/2) dy -= H; else if (dy < -H/2) dy += H;
+    const d2 = dx*dx + dy*dy;
+    if (d2 > SENSE_RANGE*SENSE_RANGE) continue;
+    const d = Math.sqrt(d2);
+    const fx = dx / (d || 1), fy = dy / (d || 1);
+    for (let k = 0; k < 3; k++){
+      const ang = a.heading + cones[k];
+      const cx = Math.cos(ang), cy = Math.sin(ang);
+      const dot = cx*fx + cy*fy;
+      if (dot > cosFov){
+        const v = 1 - d / SENSE_RANGE;
+        if (v > out[k]) out[k] = v;
+      }
+    }
+  }
+  return out;
+}
+
+// ── Step ────────────────────────────────────────────────────────────
+function step(){
+  // spawn food
+  for (let k = 0; k < FOOD_SPAWN; k++){
+    if (foods.length < FOOD_CAP && Math.random() < FOOD_SPAWN - Math.floor(FOOD_SPAWN) + (k < Math.floor(FOOD_SPAWN) ? 1 : 0)){
+      foods.push({x: Math.random()*W, y: Math.random()*H, t: Math.random()});
+    }
+  }
+  // re-seed extinct populations
+  if (agents.length < 8){
+    // when extinct, mutate top historical agent if we have one, else random
+    for (let i = agents.length; i < 12; i++){
+      agents.push(makeAgent(Math.random()*W, Math.random()*H, randomGenome()));
+    }
+  }
+  // step agents
+  const newKids = [];
+  for (let i = agents.length - 1; i >= 0; i--){
+    const a = agents[i];
+    const inp = sense(a);
+    const inputs = [inp[0], inp[1], inp[2], a.energy / 100, 1];
+    const { out, hid } = forward(a.genome, inputs);
+    const thrust = (out[0] + 1) * 0.5;  // 0..1
+    const turn   = out[1];               // -1..1
+
+    a.heading += turn * 0.18;
+    const accel = thrust * 0.35;
+    a.vx += Math.cos(a.heading) * accel;
+    a.vy += Math.sin(a.heading) * accel;
+    a.vx *= 0.92; a.vy *= 0.92;
+    a.x += a.vx; a.y += a.vy;
+    // toroidal wrap
+    if (a.x < 0) a.x += W; else if (a.x >= W) a.x -= W;
+    if (a.y < 0) a.y += H; else if (a.y >= H) a.y -= H;
+    // energy cost: base + speed²
+    const sp2 = a.vx*a.vx + a.vy*a.vy;
+    a.energy -= 0.06 + sp2 * 0.06;
+    a.age++;
+    if (a === selected) lastInputs = { inputs, hid, out };
+
+    // eat
+    for (let fi = foods.length - 1; fi >= 0; fi--){
+      const f = foods[fi];
+      let dx = f.x - a.x, dy = f.y - a.y;
+      if (dx >  W/2) dx -= W; else if (dx < -W/2) dx += W;
+      if (dy >  H/2) dy -= H; else if (dy < -H/2) dy += H;
+      if (dx*dx + dy*dy < EAT_RADIUS*EAT_RADIUS){
+        foods.splice(fi, 1);
+        a.energy = Math.min(100, a.energy + 28);
+        a.eats++;
+      }
+    }
+
+    // reproduce
+    if (a.energy > REPRO_E){
+      a.energy -= CHILD_E + 10;
+      const child = makeAgent(
+        a.x + (Math.random()-.5)*10,
+        a.y + (Math.random()-.5)*10,
+        mutate(a.genome),
+        a.gen + 1,
+        a.lineage + 1,
+      );
+      child.energy = CHILD_E;
+      newKids.push(child);
+      if (a.gen + 1 > generation) generation = a.gen + 1;
+      if (a.lineage + 1 > bestLineage) bestLineage = a.lineage + 1;
+    }
+
+    // die
+    if (a.energy <= 0){
+      totalLives++;
+      totalEats += a.eats;
+      if (a.age > bestAge) bestAge = a.age;
+      if (selected === a) { selected = null; }
+      agents.splice(i, 1);
+    }
+  }
+  for (const k of newKids) agents.push(k);
+  if (agents.length > 300) agents.splice(0, agents.length - 300); // cap
+}
+
+// ── Draw ────────────────────────────────────────────────────────────
+function draw(){
+  // motion-blur background
+  ctx.fillStyle = 'rgba(7,10,20,0.22)';
+  ctx.fillRect(0, 0, W, H);
+
+  // food
+  for (const f of foods){
+    f.t = (f.t + 0.01) % 1;
+    const pulse = 0.7 + 0.3 * Math.sin(f.t * Math.PI * 2);
+    ctx.fillStyle = `hsla(140, 80%, ${50 + pulse*15}%, ${0.6 + pulse*0.3})`;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, 2.4 + pulse*0.8, 0, 6.283);
+    ctx.fill();
+  }
+
+  // agents
+  for (const a of agents){
+    const e = Math.max(0, Math.min(1, a.energy / 100));
+    const r = a.radius;
+    // body
+    ctx.fillStyle = `hsla(${a.color}, 80%, ${40 + e*30}%, 0.95)`;
+    ctx.beginPath();
+    ctx.arc(a.x, a.y, r, 0, 6.283);
+    ctx.fill();
+    // heading indicator
+    ctx.strokeStyle = `hsl(${a.color}, 80%, 88%)`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(a.x + Math.cos(a.heading)*r*2.2, a.y + Math.sin(a.heading)*r*2.2);
+    ctx.stroke();
+    // selection ring
+    if (a === selected){
+      ctx.strokeStyle = '#FFD778';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, r + 4 + Math.sin(performance.now()/200)*1.5, 0, 6.283);
+      ctx.stroke();
+    }
+  }
+
+  // hud
+  document.getElementById('gen').textContent = generation;
+  document.getElementById('alive').textContent = agents.length;
+  document.getElementById('food').textContent = foods.length;
+  document.getElementById('age').textContent = bestAge;
+  document.getElementById('line').textContent = bestLineage;
+  document.getElementById('eat').textContent = totalLives > 0 ? (totalEats/totalLives).toFixed(1) : '–';
+
+  // brain inspector
+  if (selected){
+    document.getElementById('brain').classList.add('show');
+    document.getElementById('bEnergy').textContent = selected.energy.toFixed(0);
+    document.getElementById('bAge').textContent    = selected.age;
+    document.getElementById('bEats').textContent   = selected.eats;
+    document.getElementById('bGen').textContent    = selected.gen;
+    drawBrain();
+  } else {
+    document.getElementById('brain').classList.remove('show');
+  }
+}
+
+const bc = document.getElementById('brainCanvas');
+const bx = bc.getContext('2d');
+function drawBrain(){
+  bx.clearRect(0,0,bc.width,bc.height);
+  if (!selected || !lastInputs) return;
+  const { inputs, hid, out } = lastInputs;
+  const cols = [
+    { vals: inputs, label: 'in' },
+    { vals: hid,    label: 'hid' },
+    { vals: [out[0], out[1]], label: 'out' },
+  ];
+  const colW = bc.width / cols.length;
+  for (let ci = 0; ci < cols.length; ci++){
+    const col = cols[ci];
+    const cellH = bc.height / col.vals.length;
+    for (let vi = 0; vi < col.vals.length; vi++){
+      const v = col.vals[vi];
+      const a = Math.min(1, Math.abs(v));
+      bx.fillStyle = v >= 0 ? `rgba(120,220,255,${a})` : `rgba(255,120,140,${a})`;
+      bx.fillRect(ci*colW + 4, vi*cellH + 4, colW - 8, cellH - 8);
+    }
+  }
+}
+
+function loop(){
+  for (let i = 0; i < speed; i++) step();
+  draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+// ── Interaction ─────────────────────────────────────────────────────
+let pressStart = 0, pressX = 0, pressY = 0;
+c.addEventListener('pointerdown', (e) => {
+  pressStart = performance.now();
+  pressX = e.clientX; pressY = e.clientY;
+});
+c.addEventListener('pointerup', (e) => {
+  const dur = performance.now() - pressStart;
+  const moved = Math.hypot(e.clientX - pressX, e.clientY - pressY);
+  if (moved > 12) return;
+  // pick nearest agent within radius
+  let hit = null, hd = 18;
+  for (const a of agents){
+    let dx = a.x - e.clientX, dy = a.y - e.clientY;
+    if (dx >  W/2) dx -= W; else if (dx < -W/2) dx += W;
+    if (dy >  H/2) dy -= H; else if (dy < -H/2) dy += H;
+    const d = Math.hypot(dx, dy);
+    if (d < hd){ hd = d; hit = a; }
+  }
+  if (hit) { selected = hit; return; }
+  if (dur > 400){
+    // long-press → spawn 5 random in front
+    for (let i = 0; i < 5; i++){
+      agents.push(makeAgent(e.clientX + (Math.random()-.5)*30,
+                            e.clientY + (Math.random()-.5)*30,
+                            randomGenome()));
+    }
+  } else {
+    // tap empty → drop food
+    for (let i = 0; i < 6; i++){
+      foods.push({x: e.clientX + (Math.random()-.5)*16,
+                  y: e.clientY + (Math.random()-.5)*16, t: Math.random()});
+    }
+  }
+});
+
+// controls
+const btnSpeed = document.getElementById('btnSpeed');
+const btnReset = document.getElementById('btnReset');
+const btnFood  = document.getElementById('btnFood');
+btnSpeed.addEventListener('click', () => {
+  speed = speed >= 8 ? 1 : speed * 2;
+  btnSpeed.textContent = `speed ${speed}×`;
+});
+btnReset.addEventListener('click', reset);
+btnFood.addEventListener('click', () => {
+  for (let i = 0; i < 50; i++)
+    foods.push({x: Math.random()*W, y: Math.random()*H, t: Math.random()});
+});
+</script>
+</body>
+</html>
