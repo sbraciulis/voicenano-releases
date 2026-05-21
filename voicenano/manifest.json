@@ -1,6 +1,6 @@
 {
-  "versionCode": 6,
-  "versionName": "0.6",
+  "versionCode": 7,
+  "versionName": "0.7",
   "apkUrl": "https://github.com/sbraciulis/voicenano-releases/releases/latest/download/voicenano.apk",
-  "notes": "Model picker (Qwen 2.5 0.5B / 1.5B). Text input field alongside the mic. Speak-responses toggle for text-only output. New Settings screen (gear icon)."
+  "notes": "Background downloads no longer block the chat. Switching models that aren't yet downloaded keeps your current model active and shows progress as a small banner. When the download finishes, a green Switch banner lets you hot-swap with one tap."
 }
