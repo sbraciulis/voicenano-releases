@@ -134,9 +134,32 @@
 
   .status { color: var(--muted); font-size: 11px; text-align: center; min-height: 14px; margin: 4px 0; }
 
+  .input-wrap { position: relative; }
   .input-row {
     display: flex; align-items: center; gap: 8px;
   }
+  .slash-popup {
+    position: absolute; bottom: 100%; left: 0; right: 0;
+    margin-bottom: 6px; max-height: 50vh; overflow-y: auto;
+    background: var(--bg-2); border: 1px solid #ffffff22;
+    border-radius: 12px; padding: 4px 0;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    display: none; z-index: 50;
+  }
+  .slash-popup.show { display: block; }
+  .slash-popup .hint {
+    padding: 6px 14px 8px; color: var(--muted); font-size: 11px;
+    border-bottom: 1px solid #ffffff10;
+  }
+  .slash-item {
+    padding: 10px 14px; cursor: pointer;
+    border-bottom: 1px solid #ffffff08;
+  }
+  .slash-item:last-child { border-bottom: 0; }
+  .slash-item:hover, .slash-item.sel { background: #ffffff10; }
+  .slash-item .name { color: var(--accent); font: 13px ui-monospace, monospace; font-weight: 600; }
+  .slash-item .args { color: var(--muted); font: 12px ui-monospace, monospace; margin-left: 4px; }
+  .slash-item .desc { color: var(--text); font-size: 12px; margin-top: 3px; }
   textarea {
     flex: 1; background: rgba(255,255,255,.06); border: 1px solid #455a64;
     border-radius: 10px; padding: 10px 12px; color: var(--text); font: inherit;
@@ -414,9 +437,15 @@
       <span class="ctx-label" id="ctx-label">0 tokens</span>
     </div>
     <div class="status" id="status">Starting…</div>
-    <div class="input-row">
-      <textarea id="input" placeholder="Type a prompt, paste code, or /search foo · /time · /help" rows="1"></textarea>
-      <button class="pill-btn" id="send-btn" aria-label="Send" disabled>➤</button>
+    <div class="input-wrap">
+      <div class="slash-popup" id="slash-popup">
+        <div class="hint">Slash commands — tap to insert</div>
+      </div>
+      <div class="input-row">
+        <button class="pill-btn" id="slash-btn" aria-label="Slash commands" title="Show commands" style="width:36px;height:36px;font-size:18px">/</button>
+        <textarea id="input" placeholder="Type a prompt, paste code, or /search foo · /time · /help" rows="1"></textarea>
+        <button class="pill-btn" id="send-btn" aria-label="Send" disabled>➤</button>
+      </div>
     </div>
     <div class="mic-row">
       <button class="mic-big" id="mic-btn" disabled>🎤</button>
@@ -931,13 +960,104 @@ $('install-btn').addEventListener('click', () => {
 
 $('input').addEventListener('input', () => {
   $('send-btn').disabled = !($('input').value.trim() && state?.modelReady);
-  // auto-grow up to max-height
   const t = $('input');
   t.style.height = 'auto';
   t.style.height = Math.min(100, t.scrollHeight) + 'px';
+  maybeShowSlashPopup();
 });
 $('input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); }
+  const popup = $('slash-popup');
+  const popupOpen = popup.classList.contains('show');
+  if (popupOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    e.preventDefault();
+    moveSlashSelection(e.key === 'ArrowDown' ? 1 : -1);
+    return;
+  }
+  if (popupOpen && e.key === 'Tab') {
+    e.preventDefault();
+    selectActiveSlash();
+    return;
+  }
+  if (popupOpen && e.key === 'Escape') {
+    e.preventDefault();
+    hideSlashPopup();
+    return;
+  }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    if (popupOpen) { e.preventDefault(); selectActiveSlash(); return; }
+    e.preventDefault(); sendText();
+  }
+});
+
+// ── Slash command popup ──────────────────────────────────────────
+const COMMANDS = [
+  { name: '/time',   args: '',         desc: 'Show current date/time without calling the model.' },
+  { name: '/now',    args: '',         desc: 'Same as /time.' },
+  { name: '/search', args: ' <query>', desc: 'Web search (Wikipedia + DuckDuckGo). Model summarizes the results.' },
+  { name: '/clear',  args: '',         desc: 'Wipe this conversation.' },
+  { name: '/help',   args: '',         desc: 'List all commands inline.' },
+];
+let slashSelIdx = 0;
+let slashVisible = [];
+
+function maybeShowSlashPopup() {
+  const v = $('input').value;
+  // Only when the message starts with / and the user hasn't yet typed the argument.
+  if (!/^\/[^\s]*$/.test(v)) { hideSlashPopup(); return; }
+  showSlashPopup(v.toLowerCase());
+}
+
+function showSlashPopup(filter) {
+  const popup = $('slash-popup');
+  slashVisible = COMMANDS.filter(c => c.name.startsWith(filter || '/'));
+  // Clear, keep the .hint
+  popup.querySelectorAll('.slash-item').forEach(n => n.remove());
+  if (!slashVisible.length) { hideSlashPopup(); return; }
+  slashSelIdx = 0;
+  slashVisible.forEach((cmd, i) => {
+    const item = document.createElement('div');
+    item.className = 'slash-item' + (i === 0 ? ' sel' : '');
+    item.innerHTML = `<div><span class="name">${cmd.name}</span><span class="args">${cmd.args}</span></div>
+                      <div class="desc">${cmd.desc}</div>`;
+    item.onmousedown = (e) => { e.preventDefault(); pickSlash(cmd); };
+    item.ontouchstart = (e) => { e.preventDefault(); pickSlash(cmd); };
+    popup.appendChild(item);
+  });
+  popup.classList.add('show');
+}
+function hideSlashPopup() { $('slash-popup').classList.remove('show'); }
+
+function moveSlashSelection(delta) {
+  const items = $('slash-popup').querySelectorAll('.slash-item');
+  if (!items.length) return;
+  slashSelIdx = (slashSelIdx + delta + items.length) % items.length;
+  items.forEach((it, i) => it.classList.toggle('sel', i === slashSelIdx));
+  items[slashSelIdx].scrollIntoView({ block: 'nearest' });
+}
+function selectActiveSlash() {
+  const cmd = slashVisible[slashSelIdx];
+  if (cmd) pickSlash(cmd);
+}
+function pickSlash(cmd) {
+  const t = $('input');
+  const text = cmd.args ? `${cmd.name} ` : cmd.name;
+  t.value = text;
+  t.focus();
+  t.selectionStart = t.selectionEnd = text.length;
+  t.dispatchEvent(new Event('input'));
+  hideSlashPopup();
+}
+$('slash-btn').onclick = () => {
+  // Tapping the / button: insert "/" and show popup.
+  const t = $('input');
+  if (t.value === '') t.value = '/';
+  t.focus();
+  t.selectionStart = t.selectionEnd = t.value.length;
+  showSlashPopup(t.value.toLowerCase());
+};
+$('input').addEventListener('blur', () => {
+  // Delay so taps on popup items can fire first.
+  setTimeout(hideSlashPopup, 200);
 });
 
 $('speak-switch').onclick = () => {
