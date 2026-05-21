@@ -296,7 +296,14 @@
           <div class="b-title">Update available: <span id="update-version"></span></div>
           <div class="b-sub" id="update-notes"></div>
         </div>
-        <button onclick="Native.installUpdate()">Install</button>
+        <button id="install-btn">Install</button>
+      </div>
+      <div id="update-progress-wrap" class="hidden" style="margin-top:8px">
+        <progress id="update-bar" value="0" max="1"></progress>
+        <div class="b-sub" id="update-status">Downloading APK…</div>
+      </div>
+      <div id="update-fallback" class="hidden" style="margin-top:6px; font-size:11px">
+        <a id="update-direct-link" href="#" style="color:#fff; text-decoration:underline">Or open the APK directly in browser</a>
       </div>
     </div>
     <div id="download-banner" class="banner info hidden">
@@ -532,6 +539,27 @@ function applyState() {
     $('update-banner').classList.remove('hidden');
     $('update-version').textContent = 'v' + state.update.versionName;
     $('update-notes').textContent = state.update.notes || '';
+
+    // Show progress + fallback link if currently downloading
+    const p = state.updateProgress;
+    const inFlight = (p !== null && p !== undefined);
+    $('install-btn').disabled = inFlight;
+    $('install-btn').textContent = inFlight
+      ? (p >= 1 ? 'Opening installer…' : `Downloading ${Math.round(p*100)}%`)
+      : 'Install';
+    $('update-progress-wrap').classList.toggle('hidden', !inFlight);
+    if (inFlight) {
+      $('update-bar').value = p;
+      $('update-status').textContent = p >= 1
+        ? 'Downloaded. Opening Android installer…'
+        : `Downloading APK · ${Math.round(p * 100)}%`;
+    }
+    // Always offer a fallback direct link once we have the URL
+    if (state.update?.versionCode) {
+      $('update-fallback').classList.remove('hidden');
+      $('update-direct-link').href =
+        'https://github.com/sbraciulis/voicenano-releases/releases/latest/download/voicenano.apk';
+    }
   } else {
     $('update-banner').classList.add('hidden');
   }
@@ -699,6 +727,16 @@ $('mic-btn').onclick = () => Native.startListening();
 $('send-btn').onclick = sendText;
 $('ready-switch').onclick = () => { if (state?.readyToSwitchId) Native.useModel(state.readyToSwitchId); };
 $('retry-btn').onclick = () => Native.retryDownload();
+$('install-btn').addEventListener('click', () => {
+  // Lock the button immediately so the user gets feedback even before native state arrives.
+  $('install-btn').disabled = true;
+  $('install-btn').textContent = 'Starting…';
+  try { Native.installUpdate(); } catch (e) {
+    $('install-btn').disabled = false;
+    $('install-btn').textContent = 'Install';
+    alert('Install failed: ' + e.message);
+  }
+});
 
 $('input').addEventListener('input', () => {
   $('send-btn').disabled = !($('input').value.trim() && state?.modelReady);
