@@ -519,6 +519,19 @@ return sum * 2;
       <div class="switch" id="speak-switch"><div class="knob"></div></div>
     </div>
 
+    <div class="section">Inference backend</div>
+    <div class="setting-row">
+      <div class="grow">
+        <div class="title">Preferred backend</div>
+        <div class="sub" id="backend-sub">CPU loads in ~10s · GPU loads in ~30s but generates ~2× faster</div>
+      </div>
+      <select id="backend-select" style="background:rgba(255,255,255,.06);color:var(--text);border:1px solid #455a64;border-radius:8px;padding:8px 10px;font-size:13px">
+        <option value="cpu">CPU (fast load)</option>
+        <option value="gpu">GPU (fast inference)</option>
+        <option value="default">Auto</option>
+      </select>
+    </div>
+
     <div class="section">Model</div>
     <div id="model-list"></div>
 
@@ -853,6 +866,12 @@ function applyState() {
   $('speak-switch').classList.toggle('on', !!state.speakResponses);
   $('speak-sub').textContent = state.speakResponses ? 'Text + TTS audio' : 'Text only (silent)';
 
+  // Backend picker — only sync if not focused so user input isn't clobbered
+  const bs = $('backend-select');
+  if (bs && document.activeElement !== bs && state.preferredBackend) {
+    bs.value = state.preferredBackend;
+  }
+
   renderModels();
   renderDiag();
 }
@@ -1150,6 +1169,11 @@ $('speak-switch').onclick = () => {
   if (!state) return;
   Native.setSpeakResponses(!state.speakResponses);
 };
+$('backend-select').addEventListener('change', (e) => {
+  if (Native.setPreferredBackend) Native.setPreferredBackend(e.target.value);
+  $('backend-sub').textContent =
+    `Saved. Restart the app or switch model to apply. (Was: ${state?.lastWorkingBackend || 'unknown'})`;
+});
 $('footer-toggle').onclick = () => {
   const f = $('chat-footer');
   f.classList.toggle('collapsed');
