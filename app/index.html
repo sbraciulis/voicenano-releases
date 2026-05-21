@@ -401,7 +401,7 @@
     </div>
     <div class="status" id="status">Starting…</div>
     <div class="input-row">
-      <textarea id="input" placeholder="Type a prompt or paste code…" rows="1"></textarea>
+      <textarea id="input" placeholder="Type a prompt, paste code, or /search foo · /time · /help" rows="1"></textarea>
       <button class="pill-btn" id="send-btn" aria-label="Send" disabled>➤</button>
     </div>
     <div class="mic-row">
@@ -895,14 +895,130 @@ document.addEventListener('click', (e) => {
   else if (t.dataset.delete) Native.deleteModel(t.dataset.delete);
 });
 
-function sendText() {
+// ── Tools: time + web search ───────────────────────────────────────
+function nowText() {
+  const d = new Date();
+  return d.toString() + '  (' + Intl.DateTimeFormat().resolvedOptions().timeZone + ', ' +
+    'epoch=' + Math.floor(d.getTime() / 1000) + ')';
+}
+
+async function webSearch(query) {
+  const parts = [];
+  // Wikipedia first — usually the best single-page summary.
+  try {
+    const r = await fetch(
+      'https://en.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(query),
+      { headers: { 'Accept': 'application/json' } }
+    );
+    if (r.ok) {
+      const j = await r.json();
+      if (j.extract) {
+        parts.push(`Wikipedia: ${j.title}\n${j.extract}\nSource: ${j.content_urls?.desktop?.page || ''}`);
+      }
+    }
+  } catch (_) {}
+
+  // DuckDuckGo Instant Answer for short factual hits + related topics.
+  try {
+    const r = await fetch(
+      'https://api.duckduckgo.com/?format=json&no_html=1&skip_disambig=0&q=' +
+      encodeURIComponent(query)
+    );
+    if (r.ok) {
+      const j = await r.json();
+      if (j.AbstractText) {
+        parts.push(`DuckDuckGo abstract: ${j.AbstractText}\nSource: ${j.AbstractURL || ''}`);
+      }
+      if (j.Answer) parts.push(`Direct answer: ${j.Answer}`);
+      if (j.Definition) parts.push(`Definition: ${j.Definition}`);
+      if (Array.isArray(j.RelatedTopics) && j.RelatedTopics.length) {
+        const tops = [];
+        for (const t of j.RelatedTopics.slice(0, 4)) {
+          if (t.Text) tops.push('• ' + t.Text);
+          else if (t.Topics?.[0]?.Text) tops.push('• ' + t.Topics[0].Text);
+        }
+        if (tops.length) parts.push('Related:\n' + tops.join('\n'));
+      }
+    }
+  } catch (_) {}
+
+  return parts.length ? parts.join('\n\n') : '(No results found.)';
+}
+
+const TIME_INTENT = /\b(current|today'?s|right now|what.?s? the|tell me the)\s+(time|date|day|year|month|weekday|hour)\b|\bwhat day is it\b|\bwhat time is it\b/i;
+const SEARCH_INTENT = /\b(search for|look up|google|find (information|info|out) about|who is|who was|what is|tell me about)\b/i;
+
+function tryExtractSearchQuery(text) {
+  const m = text.match(/(?:search for|look up|google|find (?:information|info|out) about|tell me about)\s+(.+)/i);
+  if (m) return m[1].trim().replace(/[?.!]+$/, '');
+  return null;
+}
+
+async function sendText() {
   const v = $('input').value.trim();
   if (!v || !state?.modelReady) return;
-  addMessage('user', v);
   $('input').value = '';
   $('input').style.height = 'auto';
   $('send-btn').disabled = true;
-  Native.generate(buildPrompt(v));
+
+  // ── Slash commands ──────────────────────────────────────────────
+  if (v === '/help') {
+    addMessage('user', v);
+    addMessage('system',
+      'Commands:\n' +
+      '  /time           — show current date/time without calling the model\n' +
+      '  /now            — same as /time\n' +
+      '  /search <query> — fetch Wikipedia + DDG results, then ask the model to summarize\n' +
+      '  /clear          — wipe the conversation\n' +
+      '  /help           — this message\n\n' +
+      'Plain prompts: if your message mentions time/date or search intent, results are silently injected for you.'
+    );
+    return;
+  }
+  if (v === '/time' || v === '/now') {
+    addMessage('user', v);
+    addMessage('model', `${nowText()}`);
+    return;
+  }
+  if (v === '/clear') {
+    clearHistory();
+    addMessage('system', 'Conversation cleared.');
+    return;
+  }
+  if (v.startsWith('/search ')) {
+    const q = v.slice(8).trim();
+    if (!q) { addMessage('system', 'Usage: /search <query>'); return; }
+    addMessage('user', v);
+    addMessage('system', `🔍 Searching the web for "${q}"…`);
+    const res = await webSearch(q);
+    addMessage('system', `Results:\n${res}`);
+    const augmented =
+      `Web search results for "${q}":\n${res}\n\nUsing the above results, give a concise answer to the user's question about "${q}".`;
+    Native.generate(buildPrompt(augmented));
+    return;
+  }
+
+  // ── Auto-inject tools for natural prompts ────────────────────────
+  let prefix = '';
+  if (TIME_INTENT.test(v)) {
+    prefix += `[System: current date/time is ${nowText()}]\n\n`;
+  }
+  if (SEARCH_INTENT.test(v)) {
+    const q = tryExtractSearchQuery(v);
+    if (q) {
+      addMessage('user', v);
+      addMessage('system', `🔍 Looking up "${q}"…`);
+      const res = await webSearch(q);
+      addMessage('system', `Results:\n${res}`);
+      const augmented =
+        `Web search results for "${q}":\n${res}\n\nUser question: ${v}\n\nAnswer using the results above.`;
+      Native.generate(buildPrompt(augmented));
+      return;
+    }
+  }
+
+  addMessage('user', v);
+  Native.generate(buildPrompt(prefix + v));
 }
 
 function switchScreen(name) {
