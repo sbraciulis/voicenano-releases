@@ -709,7 +709,12 @@ function renderMessages() {
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
     const time = new Date(item.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    meta.innerHTML = `<span>${time}</span>`;
+    let timeLine = `<span>${time}</span>`;
+    // Append tok/s + token count for completed model responses
+    if (item.role === 'model' && item.stats && item.stats.tokens) {
+      timeLine += ` · <span style="opacity:.7">${item.stats.tokPerSec.toFixed(1)} tok/s · ${item.stats.tokens}t</span>`;
+    }
+    meta.innerHTML = timeLine;
     const copy = document.createElement('button');
     copy.className = 'copy';
     copy.textContent = 'copy';
@@ -977,7 +982,6 @@ function clearGenerationGuard() {
 
 on('onGenerationStart', () => {
   addMessage('model', '…');
-  // Watchdog: if no result/error after 90s, surface a recoverable failure.
   clearGenerationGuard();
   generationTimeout = setTimeout(() => {
     if (history.length && history[history.length - 1].text === '…') {
@@ -987,20 +991,68 @@ on('onGenerationStart', () => {
     }
   }, 90_000);
 });
+
+// Streaming token updates from v1.2+ MediaPipe generateResponseAsync.
+// We update the LAST model bubble's text live without a full re-render
+// (renderMessages would destroy/recreate iframes and lose interactive state).
+on('onGenerationToken', (p) => {
+  if (!history.length) return;
+  const last = history[history.length - 1];
+  if (last.role !== 'model') return;
+  last.text = p.text;
+  // Reset watchdog while tokens are still flowing
+  clearGenerationGuard();
+  generationTimeout = setTimeout(() => {
+    if (history.length && history[history.length - 1].text === p.text) {
+      history[history.length - 1].text += '\n\n(stalled — generation may have ended)';
+      saveHistory();
+      renderMessages();
+    }
+  }, 30_000);
+
+  // Find the current bubble and update its text node only
+  const bubbles = document.querySelectorAll('#messages .msg.model .msg-bubble');
+  const bubble = bubbles[bubbles.length - 1];
+  if (bubble) {
+    // Render code blocks live; for partial text we still apply the same formatting
+    bubble.innerHTML = renderBubbleHtml(p.text);
+  }
+  // Status line: live tok/s
+  if (typeof p.tokPerSec === 'number' && p.tokens > 1) {
+    $('status').textContent = `streaming · ${p.tokPerSec.toFixed(1)} tok/s · ${p.tokens} tokens · ${p.elapsedSec.toFixed(1)}s`;
+  } else if (typeof p.elapsedSec === 'number') {
+    $('status').textContent = `streaming · first token at ${p.elapsedSec.toFixed(1)}s…`;
+  }
+  // keep chat scrolled to bottom
+  const scr = $('chat-scroll');
+  if (scr.scrollTop + scr.clientHeight >= scr.scrollHeight - 80) {
+    scr.scrollTop = scr.scrollHeight;
+  }
+});
 on('onGenerationDone', (p) => {
   clearGenerationGuard();
-  // Replace placeholder with real text
-  if (history.length && history[history.length - 1].role === 'model' && history[history.length - 1].text === '…') {
-    history[history.length - 1].text = p.text || '(no text)';
+  // The bubble was already updated live by onGenerationToken.
+  // We just need to finalize: save history, render any inline previews, update context.
+  if (history.length && history[history.length - 1].role === 'model') {
+    history[history.length - 1].text = p.text || history[history.length - 1].text || '(no text)';
     if (pendingGraphical) {
       history[history.length - 1].autoRender = true;
       pendingGraphical = false;
+    }
+    if (p.tokens != null) {
+      history[history.length - 1].stats = {
+        tokens: p.tokens, elapsedSec: p.elapsedSec, tokPerSec: p.tokPerSec,
+      };
     }
     saveHistory();
     renderMessages();
     updateContextIndicator();
   } else {
     addMessage('model', p.text || '(no text)');
+  }
+  if (typeof p.tokPerSec === 'number') {
+    $('status').textContent =
+      `done · ${p.tokPerSec.toFixed(1)} tok/s · ${p.tokens} tokens · ${p.elapsedSec.toFixed(1)}s`;
   }
   if (state?.speakResponses && p.text) Native.speak(p.text);
 });
