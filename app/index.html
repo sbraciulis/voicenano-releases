@@ -221,6 +221,33 @@
 
   .ver-badge { color: var(--muted); font-size: 10px; padding: 8px; text-align: center; }
 
+  /* ── Code blocks inside chat bubbles ─────────────────────────────── */
+  .code-block {
+    margin: 8px 0; background: #0a0e16; border: 1px solid #1d2433;
+    border-radius: 8px; overflow: hidden;
+  }
+  .code-block-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; background: rgba(255,255,255,0.06);
+    font-size: 11px;
+  }
+  .code-block-lang { color: var(--muted); font-family: ui-monospace, monospace; }
+  .code-block-actions { display: flex; gap: 6px; }
+  .code-block-btn {
+    background: var(--accent-2); color: #000; border: 0;
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; cursor: pointer;
+  }
+  .code-block-btn.ghost {
+    background: transparent; color: var(--accent); border: 1px solid var(--accent);
+  }
+  .code-block-body {
+    margin: 0; padding: 10px;
+    font: 12px/1.45 ui-monospace, "JetBrains Mono", Consolas, monospace;
+    color: #e6edf3; overflow-x: auto;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+
   /* ── Code/Terminal screen ────────────────────────────────────────── */
   #code .code-area {
     flex: 1; min-height: 0; display: flex; flex-direction: column;
@@ -247,7 +274,7 @@
     color: var(--muted); font-size: 11px;
   }
   #code-input {
-    width: 100%; flex: 1 1 50%; min-height: 140px;
+    width: 100%; flex: 1 1 30%; min-height: 120px;
     background: #0a0e16; color: #e6edf3;
     font: 13px/1.45 ui-monospace, "JetBrains Mono", Consolas, monospace;
     border: 1px solid #1d2433; border-radius: 8px;
@@ -255,6 +282,34 @@
     tab-size: 2;
   }
   #code-input:focus { outline: none; border-color: var(--accent); }
+
+  .preview-wrap {
+    margin-top: 8px;
+    border: 1px solid #1d2433; border-radius: 8px; overflow: hidden;
+    background: #fff;
+    display: none;
+    flex-direction: column;
+    flex: 0 0 auto; max-height: 50vh; min-height: 120px;
+  }
+  .preview-wrap.active { display: flex; }
+  .preview-head {
+    background: rgba(0,0,0,0.06); color: #444;
+    font-size: 11px; padding: 5px 10px;
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid rgba(0,0,0,0.08);
+  }
+  .preview-head .label { font-weight: 600; }
+  .preview-head button {
+    background: transparent; border: 1px solid #888; color: #333;
+    font-size: 11px; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+  }
+  .preview-host {
+    flex: 1; min-height: 0; background: #fff;
+  }
+  .preview-host iframe {
+    width: 100%; height: 100%; border: 0; display: block;
+  }
+
   .terminal {
     flex: 1 1 50%; min-height: 100px;
     background: #05070d; color: #c8d3df;
@@ -376,6 +431,15 @@ const sum = [1, 2, 3, 4, 5].reduce((a, b) => a + b, 0);
 console.log('sum =', sum);
 return sum * 2;
 "></textarea>
+
+    <div class="preview-wrap" id="preview-wrap">
+      <div class="preview-head">
+        <span class="label">UI preview (sandbox)</span>
+        <button id="hide-preview">Hide</button>
+      </div>
+      <div class="preview-host" id="preview-host"></div>
+    </div>
+
     <div class="terminal" id="terminal">
       <div class="t-line t-done">Output will appear here. Each run starts fresh.</div>
     </div>
@@ -481,6 +545,46 @@ function refresh() {
 // ── Render ───────────────────────────────────────────────────────────
 const $ = (id) => document.getElementById(id);
 
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/**
+ * Convert plain text with ```fenced``` blocks into HTML.
+ * Code blocks become a styled container with "Run" + "Open" buttons.
+ * Detected languages: python/py → py, javascript/js/(empty) → js.
+ */
+function renderBubbleHtml(text) {
+  const codeRe = /```(\w+)?\s*\r?\n?([\s\S]*?)```/g;
+  let html = '';
+  let last = 0;
+  let m;
+  let idx = 0;
+  while ((m = codeRe.exec(text)) !== null) {
+    if (m.index > last) html += escapeHtml(text.slice(last, m.index));
+    const langHint = (m[1] || '').toLowerCase();
+    const isPy = langHint === 'python' || langHint === 'py';
+    const targetLang = isPy ? 'py' : 'js';
+    const codeText = m[2].replace(/\n+$/, '');
+    const langLabel = langHint || (isPy ? 'python' : 'javascript');
+    const id = `cb-${Date.now().toString(36)}-${idx++}`;
+    html += `
+      <div class="code-block">
+        <div class="code-block-head">
+          <span class="code-block-lang">${escapeHtml(langLabel)}</span>
+          <div class="code-block-actions">
+            <button class="code-block-btn ghost" data-code-action="open" data-code-id="${id}" data-code-lang="${targetLang}">↗ Open</button>
+            <button class="code-block-btn" data-code-action="run" data-code-id="${id}" data-code-lang="${targetLang}">▶ Run</button>
+          </div>
+        </div>
+        <div class="code-block-body" id="${id}">${escapeHtml(codeText)}</div>
+      </div>`;
+    last = codeRe.lastIndex;
+  }
+  if (last < text.length) html += escapeHtml(text.slice(last));
+  return html || '&nbsp;';
+}
+
 function renderMessages() {
   const m = $('messages');
   const empty = !history.length;
@@ -494,7 +598,13 @@ function renderMessages() {
     div.className = 'msg ' + item.role;
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
-    bubble.textContent = item.text;
+    // Only the model output gets the markdown code-block treatment.
+    // User input stays as plain text (so pasting markdown verbatim doesn't transform it).
+    if (item.role === 'model') {
+      bubble.innerHTML = renderBubbleHtml(item.text);
+    } else {
+      bubble.textContent = item.text;
+    }
     div.appendChild(bubble);
     const meta = document.createElement('div');
     meta.className = 'msg-meta';
@@ -508,9 +618,20 @@ function renderMessages() {
     div.appendChild(meta);
     m.appendChild(div);
   }
-  // scroll to bottom
   const scr = $('chat-scroll');
   scr.scrollTop = scr.scrollHeight;
+}
+
+/** Switch to the Code screen and load the given snippet, optionally auto-running it. */
+function openInCodePanel(lang, code, autoRun) {
+  try { localStorage.setItem(CODE_KEY(lang), code); } catch {}
+  try { localStorage.setItem(LANG_KEY, lang); } catch {}
+  currentLang = lang;
+  $('lang-select').value = lang;
+  refreshExampleDropdown();
+  $('code-input').value = code;
+  switchScreen('code');
+  if (autoRun) setTimeout(() => runCode(), 250);
 }
 
 function updateContextIndicator() {
@@ -760,10 +881,18 @@ $('footer-toggle').onclick = () => {
 };
 
 document.addEventListener('click', (e) => {
-  const u = e.target.dataset?.use, d = e.target.dataset?.download, x = e.target.dataset?.delete;
-  if (u) Native.useModel(u);
-  else if (d) Native.downloadModel(d);
-  else if (x) Native.deleteModel(x);
+  const t = e.target.closest('[data-code-action], [data-use], [data-download], [data-delete]');
+  if (!t) return;
+  if (t.dataset.codeAction) {
+    const lang = t.dataset.codeLang || 'js';
+    const el = document.getElementById(t.dataset.codeId);
+    const code = el?.textContent || '';
+    openInCodePanel(lang, code, t.dataset.codeAction === 'run');
+    return;
+  }
+  if (t.dataset.use) Native.useModel(t.dataset.use);
+  else if (t.dataset.download) Native.downloadModel(t.dataset.download);
+  else if (t.dataset.delete) Native.deleteModel(t.dataset.delete);
 });
 
 function sendText() {
@@ -796,6 +925,29 @@ const EXAMPLES = {
     fetch: `const r = await fetch('https://httpbin.org/json');\nconst j = await r.json();\nconsole.log(JSON.stringify(j, null, 2));\nreturn j.slideshow?.title || 'no title';\n`,
     dom: `const c = new OffscreenCanvas(120, 60);\nconst ctx = c.getContext('2d');\nctx.fillStyle = '#ffd778';\nctx.fillRect(10, 10, 100, 40);\nctx.fillStyle = '#000';\nctx.font = '14px sans-serif';\nctx.fillText('Drew a rect', 18, 36);\nconst blob = await c.convertToBlob();\nconsole.log('canvas blob size:', blob.size, 'bytes');\nreturn 'rendered ' + c.width + 'x' + c.height;\n`,
     async: `console.log('start');\nawait new Promise(r => setTimeout(r, 600));\nconsole.log('after 600ms');\nawait new Promise(r => setTimeout(r, 400));\nconsole.log('after another 400ms');\nreturn 'awaited 1 second total';\n`,
+    gui: `// Interactive GUI inside the preview pane
+document.body.style.cssText = 'margin:0;padding:14px;font:14px/1.4 system-ui;background:#fafafa';
+document.body.innerHTML = \`
+  <h3 style="margin:0 0 8px">Counter</h3>
+  <div>Count: <b id="n">0</b></div>
+  <button id="inc" style="margin-top:8px;padding:6px 14px;border-radius:999px;border:0;background:#ffd778;cursor:pointer">+1</button>
+  <button id="reset" style="margin:8px 0 0 6px;padding:6px 14px;border-radius:999px;border:1px solid #888;background:#fff;cursor:pointer">reset</button>
+  <canvas id="cv" width="280" height="80" style="display:block;margin-top:12px;background:#fff;border:1px solid #ccc"></canvas>
+\`;
+let n = 0;
+const ctx = document.getElementById('cv').getContext('2d');
+function draw() {
+  ctx.clearRect(0,0,280,80);
+  ctx.fillStyle = '#ffb347';
+  ctx.fillRect(0,0, Math.min(280, n*8), 80);
+  ctx.fillStyle = '#000'; ctx.font='16px sans-serif';
+  ctx.fillText(\`n = \${n}\`, 10, 24);
+}
+document.getElementById('inc').onclick = () => { n++; document.getElementById('n').textContent = n; draw(); console.log('incremented to', n); };
+document.getElementById('reset').onclick = () => { n = 0; document.getElementById('n').textContent = n; draw(); };
+draw();
+return 'GUI mounted. Tap +1 in the preview pane.';
+`,
   },
   py: {
     hello: `print("Hello, world")\n"done"\n`,
@@ -804,12 +956,33 @@ const EXAMPLES = {
     listcomp: `nums = [i * i for i in range(10) if i % 2 == 0]\nprint(nums)\nsum(nums)\n`,
     json: `import json\ndata = {"hello": "world", "values": [1, 2, 3]}\ntext = json.dumps(data, indent=2)\nprint(text)\nlen(text)\n`,
     classes: `class Counter:\n    def __init__(self): self.n = 0\n    def inc(self): self.n += 1; return self.n\n\nc = Counter()\nfor _ in range(5): print("tick", c.inc())\nc.n\n`,
+    gui: `# Interactive GUI from Python (via the JS DOM bridge)
+from js import document
+document.body.style.cssText = "margin:0;padding:14px;font:14px/1.4 system-ui;background:#fafafa"
+document.body.innerHTML = """
+  <h3 style="margin:0 0 8px">Python button</h3>
+  <div>Clicks: <b id="n">0</b></div>
+  <button id="b" style="margin-top:8px;padding:6px 14px;border-radius:999px;border:0;background:#ffd778;cursor:pointer">tap me</button>
+"""
+
+state = {"n": 0}
+def on_click(_evt):
+    state["n"] += 1
+    document.getElementById("n").textContent = str(state["n"])
+    print("python received click", state["n"])
+
+from pyodide.ffi import create_proxy
+proxy = create_proxy(on_click)
+document.getElementById("b").addEventListener("click", proxy)
+
+"GUI mounted. Tap the button."
+`,
   },
 };
 
 const EXAMPLE_LABELS = {
-  js: { hello: 'Hello, world', math: 'Math: 2+2 squared', fibonacci: 'Fibonacci(20)', fetch: 'Fetch JSON (httpbin)', dom: 'Draw to off-screen canvas', async: 'Async / setTimeout' },
-  py: { hello: 'Hello, world', math: 'Math: 2+2 squared', fibonacci: 'Fibonacci(20)', listcomp: 'List comprehension', json: 'JSON encoding', classes: 'Class + state' },
+  js: { hello: 'Hello, world', math: 'Math: 2+2 squared', fibonacci: 'Fibonacci(20)', fetch: 'Fetch JSON (httpbin)', dom: 'Draw to off-screen canvas', async: 'Async / setTimeout', gui: 'Interactive GUI (counter)' },
+  py: { hello: 'Hello, world', math: 'Math: 2+2 squared', fibonacci: 'Fibonacci(20)', listcomp: 'List comprehension', json: 'JSON encoding', classes: 'Class + state', gui: 'Interactive GUI (button)' },
 };
 
 let currentLang = localStorage.getItem(LANG_KEY) || 'js';
@@ -890,9 +1063,20 @@ function runCode() {
   else                      runJavaScript(code);
 }
 
+function showPreview() { $('preview-wrap').classList.add('active'); }
+function hidePreview() {
+  $('preview-wrap').classList.remove('active');
+  $('preview-host').innerHTML = '';
+  pyFrame = null; pyReady = false;
+  if (pyHandler) { window.removeEventListener('message', pyHandler); pyHandler = null; }
+}
+$('hide-preview').onclick = hidePreview;
+
 // ── JavaScript runner ──────────────────────────────────────────────
 function runJavaScript(code) {
   if (jsFrame) { try { jsFrame.remove(); } catch {} jsFrame = null; }
+  $('preview-host').innerHTML = '';
+  showPreview();
   const harness = `
     <!doctype html><html><body><script>
       function fmt(a) {
@@ -928,10 +1112,9 @@ function runJavaScript(code) {
       parent.postMessage({ type: 'ready' }, '*');
     <\/script></body></html>`;
   jsFrame = document.createElement('iframe');
-  jsFrame.style.display = 'none';
-  jsFrame.setAttribute('sandbox', 'allow-scripts');
+  jsFrame.setAttribute('sandbox', 'allow-scripts allow-modals allow-forms allow-popups');
   jsFrame.srcdoc = harness;
-  document.body.appendChild(jsFrame);
+  $('preview-host').appendChild(jsFrame);
 
   const handler = (ev) => {
     if (ev.source !== jsFrame?.contentWindow) return;
@@ -943,8 +1126,7 @@ function runJavaScript(code) {
       else termAppend('result', '← ' + m.text);
       termAppend('done', '── done ──');
       window.removeEventListener('message', handler);
-      try { jsFrame.remove(); } catch {}
-      jsFrame = null;
+      // Keep the iframe in the preview pane so any DOM the code rendered stays interactive
       setRunningUI(false);
     }
   };
@@ -993,15 +1175,16 @@ function ensurePyFrame() {
       });
     <\/script></body></html>`;
   pyFrame = document.createElement('iframe');
-  pyFrame.style.display = 'none';
-  // Pyodide loads WASM; sandbox allow-scripts is sufficient.
-  pyFrame.setAttribute('sandbox', 'allow-scripts');
+  pyFrame.setAttribute('sandbox', 'allow-scripts allow-modals allow-forms allow-popups');
   pyFrame.srcdoc = harness;
-  document.body.appendChild(pyFrame);
+  $('preview-host').innerHTML = '';
+  $('preview-host').appendChild(pyFrame);
+  showPreview();
 }
 
 function runPython(code) {
   ensurePyFrame();
+  showPreview();
   if (pyHandler) window.removeEventListener('message', pyHandler);
   pyHandler = (ev) => {
     if (ev.source !== pyFrame?.contentWindow) return;
