@@ -442,7 +442,10 @@
         <div class="hint">Slash commands — tap to insert</div>
       </div>
       <div class="input-row">
-        <button class="pill-btn" id="slash-btn" aria-label="Slash commands" title="Show commands" style="width:36px;height:36px;font-size:18px">/</button>
+        <button id="slash-btn" aria-label="Slash commands" title="Show commands"
+          style="background:rgba(255,255,255,0.08);border:1px solid #455a64;color:var(--accent);
+                 width:36px;height:36px;border-radius:10px;font-size:18px;cursor:pointer;
+                 flex:0 0 auto;font-weight:600">/</button>
         <textarea id="input" placeholder="Type a prompt, paste code, or /search foo · /time · /help" rows="1"></textarea>
         <button class="pill-btn" id="send-btn" aria-label="Send" disabled>➤</button>
       </div>
@@ -570,14 +573,35 @@ function totalTokens() {
   return history.reduce((s, m) => s + estimateTokens(m.text), 0);
 }
 
+/**
+ * Build a prompt using Qwen 2.5's ChatML template so the model actually parses
+ * prior turns as conversation context rather than a single text blob.
+ * Format:
+ *   <|im_start|>system\n…<|im_end|>
+ *   <|im_start|>user\n…<|im_end|>
+ *   <|im_start|>assistant\n…<|im_end|>
+ *   <|im_start|>user\n<current question><|im_end|>
+ *   <|im_start|>assistant\n   ← model continues from here
+ */
+const SYSTEM_PROMPT =
+  "You are VoiceNano, a helpful on-device AI assistant running locally on the user's phone. " +
+  "You have access to a conversation history. " +
+  "Carefully remember facts, variables, and definitions the user gives you " +
+  "(e.g. if they say \"a = 5\" you must remember a = 5 for the rest of the conversation). " +
+  "Use prior turns to answer follow-up questions accurately. " +
+  "Be concise unless asked for detail.";
+
 function buildPrompt(userText) {
-  // Keep last TURNS_TO_SEND*2 messages (each turn = user + assistant)
-  const recent = history.slice(-TURNS_TO_SEND * 2);
-  let prompt = '';
+  const recent = history.slice(-TURNS_TO_SEND * 2)
+    .filter(m => m.role === 'user' || m.role === 'model');
+  let prompt = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n`;
   for (const m of recent) {
-    prompt += `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}\n\n`;
+    const role = m.role === 'user' ? 'user' : 'assistant';
+    // Skip the placeholder "…" if we caught a mid-flight message
+    if (m.role === 'model' && m.text === '…') continue;
+    prompt += `<|im_start|>${role}\n${m.text}<|im_end|>\n`;
   }
-  prompt += `User: ${userText}\n\nAssistant:`;
+  prompt += `<|im_start|>user\n${userText}<|im_end|>\n<|im_start|>assistant\n`;
   return prompt;
 }
 
