@@ -247,6 +247,20 @@
     color: #e6edf3; overflow-x: auto;
     white-space: pre-wrap; word-wrap: break-word;
   }
+  .msg-preview {
+    margin: 8px 0 4px; border-radius: 8px; overflow: hidden;
+    border: 1px solid #1d2433; background: #fff;
+  }
+  .msg-preview-head {
+    background: rgba(0,0,0,0.06); color: #333; font-size: 11px;
+    padding: 4px 10px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .msg-preview-head .label { font-weight: 600; }
+  .msg-preview-head button {
+    background: transparent; border: 1px solid #888; color: #333;
+    font-size: 11px; padding: 2px 8px; border-radius: 999px; cursor: pointer; margin-left: 4px;
+  }
+  .msg-preview iframe { width: 100%; height: 240px; border: 0; display: block; background: #fff; }
 
   /* ── Code/Terminal screen ────────────────────────────────────────── */
   #code .code-area {
@@ -602,6 +616,15 @@ function renderMessages() {
     // User input stays as plain text (so pasting markdown verbatim doesn't transform it).
     if (item.role === 'model') {
       bubble.innerHTML = renderBubbleHtml(item.text);
+      // If this message was flagged for auto-render, mount a live preview iframe
+      // for the first JS code block found in the response.
+      if (item.autoRender) {
+        const firstJs = extractFirstJsCode(item.text);
+        if (firstJs) {
+          const preview = buildInlinePreview(firstJs);
+          bubble.appendChild(preview);
+        }
+      }
     } else {
       bubble.textContent = item.text;
     }
@@ -620,6 +643,49 @@ function renderMessages() {
   }
   const scr = $('chat-scroll');
   scr.scrollTop = scr.scrollHeight;
+}
+
+/** Pull out the first ```js/javascript fenced block (or any unfenced if none). */
+function extractFirstJsCode(text) {
+  const fenced = text.match(/```(?:javascript|js)?\s*\r?\n?([\s\S]*?)```/);
+  if (fenced) return fenced[1].replace(/\n+$/, '');
+  // model may have forgotten the fence — bail rather than guess
+  return null;
+}
+
+/** Build a sandboxed iframe element that runs the given JS against document.body. */
+function buildInlinePreview(code) {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-preview';
+  const head = document.createElement('div');
+  head.className = 'msg-preview-head';
+  head.innerHTML = `<span class="label">live preview</span><span>
+    <button data-preview-open>Open in Code panel</button>
+    <button data-preview-rerun>↻ Rerun</button>
+  </span>`;
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', 'allow-scripts allow-modals allow-forms allow-popups');
+  iframe.srcdoc = `<!doctype html><html><head><style>
+    body { margin: 0; padding: 12px; font: 14px/1.4 system-ui; background: #fff; color: #111; }
+  </style></head><body><script>
+    try { (function() { ${code} })(); } catch(e) {
+      const p = document.createElement('pre');
+      p.style.cssText = 'color:#b71c1c;background:#fff5f5;padding:8px;border-radius:6px;font:12px ui-monospace';
+      p.textContent = 'Error: ' + (e && e.stack || e);
+      document.body.appendChild(p);
+    }
+  <\/script></body></html>`;
+  head.querySelector('[data-preview-open]').onclick = (e) => {
+    e.stopPropagation();
+    openInCodePanel('js', code, true);
+  };
+  head.querySelector('[data-preview-rerun]').onclick = (e) => {
+    e.stopPropagation();
+    iframe.srcdoc = iframe.srcdoc; // reload
+  };
+  wrap.appendChild(head);
+  wrap.appendChild(iframe);
+  return wrap;
 }
 
 /** Switch to the Code screen and load the given snippet, optionally auto-running it. */
@@ -802,6 +868,10 @@ on('onGenerationDone', (p) => {
   // Replace placeholder with real text
   if (history.length && history[history.length - 1].role === 'model' && history[history.length - 1].text === '…') {
     history[history.length - 1].text = p.text || '(no text)';
+    if (pendingGraphical) {
+      history[history.length - 1].autoRender = true;
+      pendingGraphical = false;
+    }
     saveHistory();
     renderMessages();
     updateContextIndicator();
@@ -947,6 +1017,10 @@ async function webSearch(query) {
 
 const TIME_INTENT = /\b(current|today'?s|right now|what.?s? the|tell me the)\s+(time|date|day|year|month|weekday|hour)\b|\bwhat day is it\b|\bwhat time is it\b/i;
 const SEARCH_INTENT = /\b(search for|look up|google|find (information|info|out) about|who is|who was|what is|tell me about)\b/i;
+const GRAPHICAL_INTENT =
+  /\b(show me|draw|render|visualize|plot|chart|graph|animate|make me|create|generate)\b.*\b(triangle|square|circle|rectangle|polygon|star|spiral|shape|figure|drawing|image|picture|sketch|graph|chart|plot|animation|gradient|fractal|tree|grid|maze|button|form|card|ui|interface|gui|page|widget)\b|\b(triangle|circle|square|rectangle|spiral|fractal|gradient)\b.*\b(svg|canvas|css|html)\b/i;
+
+let pendingGraphical = false;
 
 function tryExtractSearchQuery(text) {
   const m = text.match(/(?:search for|look up|google|find (?:information|info|out) about|tell me about)\s+(.+)/i);
@@ -1015,6 +1089,20 @@ async function sendText() {
       Native.generate(buildPrompt(augmented));
       return;
     }
+  }
+
+  // ── Graphical intent: ask the model for runnable JS, then auto-render in the bubble
+  if (GRAPHICAL_INTENT.test(v)) {
+    pendingGraphical = true;
+    const aug =
+      `${v}\n\n` +
+      `[Respond with a single \`\`\`javascript ... \`\`\` code block that renders the visual ` +
+      `by mutating document.body (use canvas, SVG, or styled HTML). The code runs in a sandboxed ` +
+      `iframe automatically, so do not include <html>/<body> tags — just the JS. Keep it under 60 lines. ` +
+      `Do not include any explanation outside the code block.]`;
+    addMessage('user', v);
+    Native.generate(buildPrompt(prefix + aug));
+    return;
   }
 
   addMessage('user', v);
