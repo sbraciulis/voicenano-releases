@@ -1216,9 +1216,10 @@ $('stop-code').onclick = stopCode;
 $('clear-terminal').onclick = clearTerminal;
 $('example-select').onchange = (e) => {
   const v = e.target.value;
-  if (v && EXAMPLES[v]) {
-    $('code-input').value = EXAMPLES[v];
-    try { localStorage.setItem(CODE_KEY, EXAMPLES[v]); } catch {}
+  const code = v ? EXAMPLES[currentLang]?.[v] : null;
+  if (code) {
+    $('code-input').value = code;
+    try { localStorage.setItem(CODE_KEY(currentLang), code); } catch {}
     e.target.value = '';
   }
 };
