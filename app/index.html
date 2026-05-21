@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<title>VoiceNano</title>
+<style>
+  :root {
+    --bg: #0d111a;
+    --bg-2: #161c2a;
+    --card: rgba(255,255,255,0.07);
+    --card-strong: rgba(255,255,255,0.13);
+    --accent: #FFD778;
+    --accent-2: #FFB347;
+    --text: #e8eef7;
+    --muted: #9ABEC8;
+    --ok: #2E7D32;
+    --err: #B71C1C;
+    --info: #1565C0;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100dvh;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    overflow: hidden;
+  }
+  body { display: flex; flex-direction: column; }
+  .screen {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 14px 18px 24px; display: flex; flex-direction: column;
+  }
+  .screen.hidden { display: none; }
+  header {
+    display: grid; grid-template-columns: 40px 1fr 40px;
+    align-items: center; padding: 14px 4px 6px;
+  }
+  header .title { text-align: center; color: var(--accent); font-size: 22px; font-weight: 700; }
+  header .sub { text-align: center; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
+  header button.icon {
+    grid-column: 3; background: none; border: 0; color: var(--accent);
+    font-size: 20px; padding: 8px; cursor: pointer;
+  }
+  header button.back {
+    grid-column: 1; background: none; border: 0; color: var(--accent);
+    font-size: 20px; padding: 8px; cursor: pointer; text-align: left;
+  }
+
+  .card {
+    background: var(--card); border-radius: 12px; padding: 14px;
+    margin-bottom: 12px;
+  }
+  .card .label { color: var(--accent); font-size: 12px; margin-bottom: 4px; }
+  .card .body { color: var(--text); font-size: 15px; white-space: pre-wrap; word-wrap: break-word; }
+
+  .banner { border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  .banner.info { background: var(--info); }
+  .banner.ok   { background: var(--ok); }
+  .banner.err  { background: var(--err); }
+  .banner .title { font-weight: 600; font-size: 13px; }
+  .banner .sub   { color: rgba(255,255,255,.78); font-size: 11px; margin-top: 2px; }
+  .banner .row   { display: flex; align-items: center; gap: 10px; }
+  .banner .grow  { flex: 1; min-width: 0; }
+  .banner button {
+    background: var(--accent); color: #000; border: 0;
+    padding: 8px 14px; border-radius: 999px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+
+  progress {
+    width: 100%; height: 6px; -webkit-appearance: none; appearance: none;
+    border-radius: 3px; overflow: hidden;
+  }
+  progress::-webkit-progress-bar { background: rgba(255,255,255,.18); border-radius: 3px; }
+  progress::-webkit-progress-value { background: #fff; }
+
+  .status { color: var(--muted); font-size: 12px; text-align: center; margin: 10px 0; min-height: 16px; }
+  .input-row {
+    display: flex; align-items: center; gap: 8px; margin-top: auto;
+  }
+  textarea {
+    flex: 1; background: rgba(255,255,255,.06); border: 1px solid #455a64;
+    border-radius: 10px; padding: 10px 12px; color: var(--text); font: inherit;
+    resize: none; min-height: 44px; max-height: 100px;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  .send-btn, .mic-btn {
+    background: var(--accent-2); color: #000; border: 0;
+    width: 44px; height: 44px; border-radius: 50%; cursor: pointer;
+    display: grid; place-items: center; font-size: 18px; flex: 0 0 auto;
+  }
+  .send-btn:disabled, .mic-btn:disabled { background: #455a64; color: #1a1a1a; cursor: default; }
+  .mic-row { display: flex; justify-content: center; padding: 14px 0; }
+  .mic-big {
+    width: 88px; height: 88px; border-radius: 50%; border: 0;
+    background: var(--accent-2); color: #000; cursor: pointer;
+    font-size: 32px; box-shadow: 0 4px 20px rgba(255,179,71,0.35);
+  }
+  .mic-big.listening { background: #E57373; }
+  .mic-big:disabled { background: #455a64; box-shadow: none; }
+
+  /* Settings */
+  .section { color: var(--accent); font-size: 12px; font-weight: 600; margin: 18px 4px 6px; }
+  .setting-row {
+    background: var(--card); border-radius: 12px; padding: 14px;
+    margin-bottom: 8px; display: flex; align-items: center;
+  }
+  .setting-row .grow { flex: 1; min-width: 0; }
+  .setting-row .title { font-size: 14px; font-weight: 600; }
+  .setting-row .sub { color: var(--muted); font-size: 12px; }
+  .switch {
+    width: 46px; height: 26px; background: #455a64; border-radius: 999px;
+    position: relative; cursor: pointer; flex: 0 0 auto;
+  }
+  .switch.on { background: #7e5e1a; }
+  .switch .knob {
+    position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+    background: #ccc; border-radius: 50%; transition: transform .15s, background .15s;
+  }
+  .switch.on .knob { transform: translateX(20px); background: var(--accent); }
+
+  .model-row {
+    background: var(--card); border-radius: 12px; padding: 14px; margin-bottom: 8px;
+  }
+  .model-row.active { background: rgba(255,215,120,0.2); }
+  .model-row .meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .model-row .actions { display: flex; gap: 8px; margin-top: 10px; }
+  .model-row button.primary {
+    background: var(--accent-2); color: #000; border: 0;
+    padding: 8px 14px; border-radius: 999px; font-weight: 600; cursor: pointer;
+  }
+  .model-row button.primary.muted { background: #455a64; color: #fff; }
+  .model-row button.danger {
+    background: transparent; color: #ef9a9a; border: 1px solid #ef9a9a;
+    padding: 6px 12px; border-radius: 999px; font-size: 12px; cursor: pointer;
+  }
+  .check { color: var(--accent); margin-left: 6px; }
+
+  .diag-row { display: flex; padding: 2px 0; font-size: 12px; }
+  .diag-row .k { color: var(--muted); flex: 0 0 44%; }
+  .diag-row .v { color: var(--text); flex: 1; word-break: break-word; }
+
+  .ver-badge { color: var(--muted); font-size: 10px; padding: 6px; text-align: center; }
+</style>
+</head>
+<body>
+
+<header id="chat-header">
+  <div></div>
+  <div class="title">VoiceNano</div>
+  <button class="icon" id="open-settings" aria-label="Settings">⚙</button>
+</header>
+<div class="sub" id="model-line">Loading…</div>
+
+<div id="chat" class="screen">
+  <div id="update-banner" class="banner ok" style="display:none">
+    <div class="row">
+      <div class="grow">
+        <div class="title">Update available: <span id="update-version"></span></div>
+        <div class="sub" id="update-notes"></div>
+      </div>
+      <button onclick="Native.installUpdate()">Install</button>
+    </div>
+  </div>
+
+  <div id="download-banner" class="banner info" style="display:none">
+    <div class="title">Downloading <span id="dl-name"></span></div>
+    <progress id="dl-bar" value="0" max="1"></progress>
+    <div class="sub"><span id="dl-stats"></span></div>
+    <div class="sub">Chat below keeps working while this runs.</div>
+  </div>
+
+  <div id="ready-banner" class="banner ok" style="display:none">
+    <div class="row">
+      <div class="grow">
+        <div class="title">Ready: <span id="ready-name"></span></div>
+        <div class="sub">Tap to make it the active model.</div>
+      </div>
+      <button id="ready-switch">Switch</button>
+    </div>
+  </div>
+
+  <div id="failed-banner" class="banner err" style="display:none">
+    <div class="row">
+      <div class="grow">
+        <div class="title">Download failed</div>
+        <div class="sub" id="fail-reason"></div>
+      </div>
+      <button id="retry-btn">Retry</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="label">You said / typed</div>
+    <div class="body" id="user-text">—</div>
+  </div>
+  <div class="card" style="min-height: 140px">
+    <div class="label">Model says</div>
+    <div class="body" id="model-text">(answer will appear here)</div>
+  </div>
+
+  <div class="status" id="status">Starting…</div>
+
+  <div class="input-row">
+    <textarea id="input" placeholder="Type a prompt or paste code…" rows="1"></textarea>
+    <button class="send-btn" id="send-btn" aria-label="Send" disabled>➤</button>
+  </div>
+
+  <div class="mic-row">
+    <button class="mic-big" id="mic-btn" disabled>🎤</button>
+  </div>
+</div>
+
+<header id="settings-header" style="display:none">
+  <button class="back" id="close-settings" aria-label="Back">←</button>
+  <div class="title">Settings</div>
+  <div></div>
+</header>
+
+<div id="settings" class="screen hidden">
+  <div class="section">Output</div>
+  <div class="setting-row">
+    <div class="grow">
+      <div class="title">Speak responses</div>
+      <div class="sub" id="speak-sub">Text + TTS audio</div>
+    </div>
+    <div class="switch" id="speak-switch"><div class="knob"></div></div>
+  </div>
+
+  <div class="section">Model</div>
+  <div id="model-list"></div>
+
+  <div class="section">Diagnostics</div>
+  <div id="diag" class="card"></div>
+
+  <div class="ver-badge" id="ui-version">UI live</div>
+</div>
+
+<script>
+// ── Native event dispatch ────────────────────────────────────────────
+const listeners = new Map();
+function on(event, fn) {
+  if (!listeners.has(event)) listeners.set(event, []);
+  listeners.get(event).push(fn);
+}
+window.NativeEvents = {
+  dispatch(name, payload) {
+    (listeners.get(name) || []).forEach(fn => { try { fn(payload); } catch (e) { console.error(e); } });
+  }
+};
+
+// ── State ────────────────────────────────────────────────────────────
+let state = null;
+function refresh() {
+  try { state = JSON.parse(Native.getState()); applyState(); } catch (e) { console.error(e); }
+}
+
+// ── Render ───────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+
+function applyState() {
+  if (!state) return;
+  const m = state.models.find(x => x.id === state.activeModelId);
+  $('model-line').textContent = state.modelReady ? `${m?.name || ''} · on-device` : (state.status || 'Loading…');
+  $('status').textContent = state.status || '';
+  $('mic-btn').disabled = !state.modelReady;
+  $('mic-btn').classList.toggle('listening', !!state.listening);
+  $('mic-btn').textContent = state.listening ? '⏸' : '🎤';
+  const inputVal = $('input').value.trim();
+  $('send-btn').disabled = !(state.modelReady && inputVal);
+
+  // Update banner
+  if (state.update) {
+    $('update-banner').style.display = '';
+    $('update-version').textContent = 'v' + state.update.versionName;
+    $('update-notes').textContent = state.update.notes || '';
+  } else {
+    $('update-banner').style.display = 'none';
+  }
+
+  // Download banner — only when a DIFFERENT model is downloading
+  const dlId = state.downloadingModelId;
+  const downloadingDifferent = dlId && dlId !== state.activeModelId;
+  const dlModel = dlId ? state.models.find(x => x.id === dlId) : null;
+  if (downloadingDifferent) {
+    $('download-banner').style.display = '';
+    $('dl-name').textContent = dlModel?.name || '';
+  } else {
+    $('download-banner').style.display = 'none';
+  }
+
+  // Ready banner
+  if (state.readyToSwitchId) {
+    $('ready-banner').style.display = '';
+    const r = state.models.find(x => x.id === state.readyToSwitchId);
+    $('ready-name').textContent = r?.name || '';
+  } else {
+    $('ready-banner').style.display = 'none';
+  }
+
+  // Failed banner — only show inline if we have a working model
+  if (state.downloadFailed && state.modelReady) {
+    $('failed-banner').style.display = '';
+    $('fail-reason').textContent = state.downloadFailed;
+  } else {
+    $('failed-banner').style.display = 'none';
+  }
+
+  // Speak switch
+  $('speak-switch').classList.toggle('on', !!state.speakResponses);
+  $('speak-sub').textContent = state.speakResponses ? 'Text + TTS audio' : 'Text only (silent)';
+
+  // Model list
+  renderModels();
+  renderDiag();
+}
+
+function renderModels() {
+  const list = $('model-list');
+  list.innerHTML = '';
+  for (const m of state.models) {
+    const active = m.id === state.activeModelId;
+    const downloading = m.id === state.downloadingModelId;
+    const row = document.createElement('div');
+    row.className = 'model-row' + (active ? ' active' : '');
+    const mb = (n) => Math.round(n / 1048576);
+    let action = '';
+    if (active && m.downloaded) action = '<button class="primary muted">Active</button>';
+    else if (m.downloaded) action = `<button class="primary" data-use="${m.id}">Use this</button>`;
+    else if (downloading) action = '<button class="primary muted">Downloading…</button>';
+    else action = `<button class="primary" data-download="${m.id}">Download</button>`;
+
+    const delBtn = (!active && m.downloaded) ? `<button class="danger" data-delete="${m.id}">Delete</button>` : '';
+
+    row.innerHTML = `
+      <div style="display:flex">
+        <div style="flex:1">
+          <div style="font-weight:600">${m.name}${active ? '<span class="check">✓ active</span>' : ''}</div>
+          <div class="meta">${m.tagline}</div>
+          <div class="meta">${mb(m.sizeBytes)} MB${m.downloaded ? ` · on disk: ${mb(m.onDiskBytes)} MB` : ' · not downloaded'}</div>
+        </div>
+      </div>
+      <div class="actions">${action}${delBtn}</div>`;
+    list.appendChild(row);
+  }
+}
+
+function renderDiag() {
+  try {
+    const d = JSON.parse(Native.getDiagnostics());
+    const rows = [
+      ['App', d.appVersion],
+      ['Device', d.device],
+      ['Android', d.android],
+      ['LLM backend', d.llmBackend],
+      ['STT on-device', d.onDeviceSttAvailable ? 'yes' : 'no'],
+      ['STT in use', d.sttInUseOnDevice ? 'on-device (offline)' : 'system'],
+      ['Web UI URL', d.webUiUrl || '(bundled)'],
+      ['AICore', `${d.aicorePackage} ${d.aicoreVersion}`],
+    ];
+    $('diag').innerHTML = rows.map(([k,v]) =>
+      `<div class="diag-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join('');
+  } catch (e) { console.error(e); }
+}
+
+// ── Events ───────────────────────────────────────────────────────────
+on('onReady',  (p) => { state = p; applyState(); });
+on('onState',  (p) => { state = p; applyState(); });
+on('onSttResult', (p) => {
+  $('user-text').textContent = p.text;
+  Native.generate(p.text);
+});
+on('onSttError', (p) => {
+  $('status').textContent = 'STT: ' + p.name + (p.message ? ` — ${p.message}` : '');
+});
+on('onGenerationStart', () => { $('model-text').textContent = '…'; });
+on('onGenerationDone', (p) => { $('model-text').textContent = p.text || '(no text)'; });
+on('onGenerationError', (p) => { $('model-text').textContent = 'Error: ' + p.message; });
+on('onMicGranted', () => { $('status').textContent = 'Mic granted.'; });
+on('onMicDenied', () => { $('status').textContent = 'Mic denied. Open app settings.'; });
+on('onDownloadProgress', (p) => {
+  $('dl-bar').value = p.ratio;
+  const mb = (n) => Math.round(n / 1048576);
+  const kb = (n) => Math.round(n / 1024);
+  let stats = `${mb(p.bytesRead)} / ${mb(p.bytesTotal)} MB · ${kb(p.speedBytesPerSec)} KB/s · ${Math.round(p.ratio*100)}%`;
+  if (p.attempt > 1) stats += ` · retry ${p.attempt}/${p.maxAttempts}`;
+  $('dl-stats').textContent = stats;
+});
+on('onDownloadDone', () => refresh());
+on('onDownloadFailed', () => refresh());
+on('onModelReady', () => refresh());
+
+// ── UI handlers ──────────────────────────────────────────────────────
+$('open-settings').onclick = () => switchScreen('settings');
+$('close-settings').onclick = () => switchScreen('chat');
+$('mic-btn').onclick = () => Native.startListening();
+$('send-btn').onclick = sendText;
+$('ready-switch').onclick = () => { if (state?.readyToSwitchId) Native.useModel(state.readyToSwitchId); };
+$('retry-btn').onclick = () => Native.retryDownload();
+$('input').addEventListener('input', () => {
+  $('send-btn').disabled = !($('input').value.trim() && state?.modelReady);
+});
+$('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); }
+});
+$('speak-switch').onclick = () => {
+  if (!state) return;
+  Native.setSpeakResponses(!state.speakResponses);
+};
+document.addEventListener('click', (e) => {
+  const u = e.target.dataset?.use, d = e.target.dataset?.download, x = e.target.dataset?.delete;
+  if (u) Native.useModel(u);
+  else if (d) Native.downloadModel(d);
+  else if (x) Native.deleteModel(x);
+});
+
+function sendText() {
+  const v = $('input').value.trim();
+  if (!v || !state?.modelReady) return;
+  $('user-text').textContent = v;
+  $('input').value = '';
+  $('send-btn').disabled = true;
+  Native.generate(v);
+}
+
+function switchScreen(name) {
+  $('chat').classList.toggle('hidden', name !== 'chat');
+  $('settings').classList.toggle('hidden', name !== 'settings');
+  $('chat-header').style.display = name === 'chat' ? '' : 'none';
+  $('settings-header').style.display = name === 'settings' ? '' : 'none';
+  $('model-line').style.display = name === 'chat' ? '' : 'none';
+}
+
+// Initial state pull in case onReady hasn't fired yet
+setTimeout(() => { if (!state) refresh(); }, 50);
+$('ui-version').textContent = 'Web UI build ' + (new Date().toISOString().slice(0,16));
+</script>
+</body>
+</html>
