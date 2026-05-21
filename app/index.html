@@ -591,19 +591,30 @@ const SYSTEM_PROMPT =
   "Use prior turns to answer follow-up questions accurately. " +
   "Be concise unless asked for detail.";
 
-function buildPrompt(userText) {
+/**
+ * @param {string} [overrideLast] — if provided, replaces the LAST user message
+ *   in history with this text (useful for /search and graphical-intent paths
+ *   where the user's visible bubble differs from what the model should see).
+ *   If omitted, the prompt is built straight from history as-is.
+ */
+function buildPrompt(overrideLast) {
   const recent = history.slice(-TURNS_TO_SEND * 2)
     .filter(m => m.role === 'user' || m.role === 'model');
   let prompt = `<|im_start|>system\n${SYSTEM_PROMPT}<|im_end|>\n`;
-  for (const m of recent) {
+  for (let i = 0; i < recent.length; i++) {
+    const m = recent[i];
+    if (m.role === 'model' && m.text === '…') continue; // skip placeholder
+    const isLastUser = (i === recent.length - 1) && m.role === 'user';
+    const text = (isLastUser && overrideLast) ? overrideLast : m.text;
     const role = m.role === 'user' ? 'user' : 'assistant';
-    // Skip the placeholder "…" if we caught a mid-flight message
-    if (m.role === 'model' && m.text === '…') continue;
-    prompt += `<|im_start|>${role}\n${m.text}<|im_end|>\n`;
+    prompt += `<|im_start|>${role}\n${text}<|im_end|>\n`;
   }
-  prompt += `<|im_start|>user\n${userText}<|im_end|>\n<|im_start|>assistant\n`;
+  // Open the assistant turn — the model continues from here.
+  prompt += `<|im_start|>assistant\n`;
+  lastPromptSent = prompt; // for /debug
   return prompt;
 }
+let lastPromptSent = '';
 
 function refresh() {
   try { state = JSON.parse(Native.getState()); applyState(); } catch (e) { console.error(e); }
@@ -908,7 +919,7 @@ on('onReady',  (p) => { state = p; applyState(); });
 on('onState',  (p) => { state = p; applyState(); });
 on('onSttResult', (p) => {
   addMessage('user', p.text);
-  Native.generate(buildPrompt(p.text));
+  Native.generate(buildPrompt());
 });
 on('onSttError', (p) => {
   $('status').textContent = 'STT: ' + p.name + (p.message ? ` — ${p.message}` : '');
@@ -1203,6 +1214,11 @@ async function sendText() {
     addMessage('system', 'Conversation cleared.');
     return;
   }
+  if (v === '/debug') {
+    addMessage('user', v);
+    addMessage('system', 'Last prompt sent to model:\n\n' + (lastPromptSent || '(none yet)'));
+    return;
+  }
   if (v.startsWith('/search ')) {
     const q = v.slice(8).trim();
     if (!q) { addMessage('system', 'Usage: /search <query>'); return; }
@@ -1210,9 +1226,9 @@ async function sendText() {
     addMessage('system', `🔍 Searching the web for "${q}"…`);
     const res = await webSearch(q);
     addMessage('system', `Results:\n${res}`);
-    const augmented =
+    const override =
       `Web search results for "${q}":\n${res}\n\nUsing the above results, give a concise answer to the user's question about "${q}".`;
-    Native.generate(buildPrompt(augmented));
+    Native.generate(buildPrompt(override));
     return;
   }
 
@@ -1228,9 +1244,9 @@ async function sendText() {
       addMessage('system', `🔍 Looking up "${q}"…`);
       const res = await webSearch(q);
       addMessage('system', `Results:\n${res}`);
-      const augmented =
+      const override =
         `Web search results for "${q}":\n${res}\n\nUser question: ${v}\n\nAnswer using the results above.`;
-      Native.generate(buildPrompt(augmented));
+      Native.generate(buildPrompt(override));
       return;
     }
   }
@@ -1238,19 +1254,19 @@ async function sendText() {
   // ── Graphical intent: ask the model for runnable JS, then auto-render in the bubble
   if (GRAPHICAL_INTENT.test(v)) {
     pendingGraphical = true;
-    const aug =
+    const override =
       `${v}\n\n` +
       `[Respond with a single \`\`\`javascript ... \`\`\` code block that renders the visual ` +
       `by mutating document.body (use canvas, SVG, or styled HTML). The code runs in a sandboxed ` +
       `iframe automatically, so do not include <html>/<body> tags — just the JS. Keep it under 60 lines. ` +
       `Do not include any explanation outside the code block.]`;
     addMessage('user', v);
-    Native.generate(buildPrompt(prefix + aug));
+    Native.generate(buildPrompt(prefix + override));
     return;
   }
 
   addMessage('user', v);
-  Native.generate(buildPrompt(prefix + v));
+  Native.generate(prefix ? buildPrompt(prefix + v) : buildPrompt());
 }
 
 function switchScreen(name) {
