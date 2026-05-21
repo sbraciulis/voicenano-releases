@@ -796,11 +796,19 @@ function updateContextIndicator() {
 function applyState() {
   if (!state) return;
   const m = state.models.find(x => x.id === state.activeModelId);
-  if (state.modelReady && !warm) {
-    $('model-line').textContent = `${m?.name || ''} · warming up…`;
+  // Always show the model name so the user can see what's active.
+  // Append a state suffix instead of replacing the line.
+  const modelName = m?.name || (state.activeModelId ?? 'no model');
+  let suffix;
+  if (!state.modelReady) {
+    // Brief, fixed suffix — the verbose backend message goes in the status line below
+    suffix = ' · loading…';
+  } else if (!warm) {
+    suffix = ' · warming up…';
   } else {
-    $('model-line').textContent = state.modelReady ? `${m?.name || ''} · on-device` : (state.status || 'Loading…');
+    suffix = ' · on-device';
   }
+  $('model-line').textContent = modelName + suffix;
   $('status').textContent = state.status || '';
   const warm = isWarmedUp();
   $('mic-btn').disabled = !(state.modelReady && warm);
