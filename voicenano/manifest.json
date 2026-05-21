@@ -1,6 +1,6 @@
 {
-  "versionCode": 10,
-  "versionName": "1.0",
+  "versionCode": 11,
+  "versionName": "1.1",
   "apkUrl": "https://github.com/sbraciulis/voicenano-releases/releases/latest/download/voicenano.apk",
-  "notes": "Fixes Qwen 2.5 1.5B load failure. Now tries GPU → CPU → default LiteRT backends so newer-signature models work. MediaPipe bumped to 0.10.24."
+  "notes": "Faster model load. CPU backend by default (~10s vs ~30s for GPU). Backend choice now persists per model, so subsequent launches go straight to the known-working backend. New Settings → Inference backend selector for power users who want GPU. Lower maxTokens for less memory pressure."
 }
