@@ -220,6 +220,57 @@
   .diag-row .v { color: var(--text); flex: 1; word-break: break-word; }
 
   .ver-badge { color: var(--muted); font-size: 10px; padding: 8px; text-align: center; }
+
+  /* ── Code/Terminal screen ────────────────────────────────────────── */
+  #code .code-area {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    padding: 8px 14px 12px;
+  }
+  #code .code-toolbar {
+    display: flex; gap: 6px; align-items: center;
+    padding: 4px 14px 8px; flex-wrap: wrap;
+  }
+  #code .code-toolbar button {
+    background: var(--accent-2); color: #000; border: 0;
+    padding: 6px 12px; border-radius: 999px; font-weight: 600;
+    font-size: 12px; cursor: pointer;
+  }
+  #code .code-toolbar button.stop { background: #E57373; }
+  #code .code-toolbar button.ghost {
+    background: transparent; color: var(--accent); border: 1px solid var(--accent);
+  }
+  #code .code-toolbar select {
+    background: rgba(255,255,255,.06); color: var(--text); border: 1px solid #455a64;
+    border-radius: 999px; padding: 6px 10px; font-size: 12px;
+  }
+  #code .code-toolbar .label {
+    color: var(--muted); font-size: 11px;
+  }
+  #code-input {
+    width: 100%; flex: 1 1 50%; min-height: 140px;
+    background: #0a0e16; color: #e6edf3;
+    font: 13px/1.45 ui-monospace, "JetBrains Mono", Consolas, monospace;
+    border: 1px solid #1d2433; border-radius: 8px;
+    padding: 10px 12px; resize: none;
+    tab-size: 2;
+  }
+  #code-input:focus { outline: none; border-color: var(--accent); }
+  .terminal {
+    flex: 1 1 50%; min-height: 100px;
+    background: #05070d; color: #c8d3df;
+    font: 12px/1.5 ui-monospace, "JetBrains Mono", Consolas, monospace;
+    border: 1px solid #1d2433; border-radius: 8px;
+    padding: 10px 12px; margin-top: 8px;
+    overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;
+  }
+  .terminal .t-line { padding: 1px 0; }
+  .terminal .t-prompt { color: var(--accent); }
+  .terminal .t-log   { color: #c8d3df; }
+  .terminal .t-warn  { color: #ffd778; }
+  .terminal .t-err   { color: #ff8a80; }
+  .terminal .t-info  { color: #82b1ff; }
+  .terminal .t-result { color: #b9f6ca; }
+  .terminal .t-done  { color: var(--muted); font-style: italic; }
 </style>
 </head>
 <body>
@@ -228,6 +279,7 @@
   <button class="back-btn hidden" id="close-settings" aria-label="Back">←</button>
   <div class="title">VoiceNano</div>
   <div class="actions" id="chat-actions">
+    <button class="icon-btn" id="open-code" aria-label="Code runner" title="Code runner">&lt;/&gt;</button>
     <button class="icon-btn" id="clear-chat" aria-label="Clear conversation" title="Clear conversation">🗑</button>
     <button class="icon-btn" id="open-settings" aria-label="Settings">⚙</button>
   </div>
@@ -292,6 +344,37 @@
     </div>
     <div class="mic-row">
       <button class="mic-big" id="mic-btn" disabled>🎤</button>
+    </div>
+  </div>
+</main>
+
+<!-- ── Code/Terminal screen ───────────────────────────────────────── -->
+<main id="code" class="screen hidden">
+  <div class="code-toolbar">
+    <button id="run-code">▶ Run</button>
+    <button id="stop-code" class="stop hidden">■ Stop</button>
+    <button id="clear-terminal" class="ghost">Clear output</button>
+    <select id="example-select" aria-label="Examples">
+      <option value="">Examples…</option>
+      <option value="hello">Hello, world</option>
+      <option value="math">Math: 2+2 squared</option>
+      <option value="fibonacci">Fibonacci(20)</option>
+      <option value="fetch">Fetch JSON (httpbin)</option>
+      <option value="dom">Draw to off-screen canvas</option>
+      <option value="async">Async / setTimeout</option>
+    </select>
+    <button id="send-code-ai" class="ghost">Ask AI →</button>
+  </div>
+  <div class="code-area">
+    <textarea id="code-input" spellcheck="false" placeholder="// Write JavaScript here. Output appears below.
+// Tap ▶ Run to execute in a sandboxed iframe.
+
+const sum = [1, 2, 3, 4, 5].reduce((a, b) => a + b, 0);
+console.log('sum =', sum);
+return sum * 2;
+"></textarea>
+    <div class="terminal" id="terminal">
+      <div class="t-line t-done">Output will appear here. Each run starts fresh.</div>
     </div>
   </div>
 </main>
@@ -662,9 +745,190 @@ function sendText() {
 function switchScreen(name) {
   $('chat').classList.toggle('hidden', name !== 'chat');
   $('settings').classList.toggle('hidden', name !== 'settings');
+  $('code').classList.toggle('hidden', name !== 'code');
   $('chat-actions').classList.toggle('hidden', name !== 'chat');
   $('close-settings').classList.toggle('hidden', name === 'chat');
 }
+
+// ── Code runner (sandboxed iframe) ────────────────────────────────
+const CODE_KEY = 'voicenano:code:v1';
+const EXAMPLES = {
+  hello: `console.log('Hello, world');
+return 'done';
+`,
+  math: `const x = 2 + 2;
+const y = x ** 2;
+console.log('2 + 2 =', x, ', squared =', y);
+return y;
+`,
+  fibonacci: `function fib(n) {
+  let [a, b] = [0n, 1n];
+  for (let i = 0; i < n; i++) [a, b] = [b, a + b];
+  return a;
+}
+const out = [];
+for (let i = 0; i <= 20; i++) out.push(fib(i).toString());
+console.log(out.join(', '));
+return fib(20).toString();
+`,
+  fetch: `const r = await fetch('https://httpbin.org/json');
+const j = await r.json();
+console.log(JSON.stringify(j, null, 2));
+return j.slideshow?.title || 'no title';
+`,
+  dom: `const c = new OffscreenCanvas(120, 60);
+const ctx = c.getContext('2d');
+ctx.fillStyle = '#ffd778';
+ctx.fillRect(10, 10, 100, 40);
+ctx.fillStyle = '#000';
+ctx.font = '14px sans-serif';
+ctx.fillText('Drew a rect', 18, 36);
+const blob = await c.convertToBlob();
+console.log('canvas blob size:', blob.size, 'bytes');
+return 'rendered ' + c.width + 'x' + c.height;
+`,
+  async: `console.log('start');
+await new Promise(r => setTimeout(r, 600));
+console.log('after 600ms');
+await new Promise(r => setTimeout(r, 400));
+console.log('after another 400ms');
+return 'awaited 1 second total';
+`,
+};
+
+// Restore last code from localStorage
+try {
+  const saved = localStorage.getItem(CODE_KEY);
+  if (saved) $('code-input').value = saved;
+} catch {}
+$('code-input').addEventListener('input', () => {
+  try { localStorage.setItem(CODE_KEY, $('code-input').value); } catch {}
+});
+
+let codeFrame = null;
+
+function termAppend(level, text) {
+  const term = $('terminal');
+  const line = document.createElement('div');
+  line.className = 't-line t-' + level;
+  line.textContent = text;
+  term.appendChild(line);
+  term.scrollTop = term.scrollHeight;
+}
+
+function clearTerminal() {
+  $('terminal').innerHTML = '';
+}
+
+function stopCode() {
+  if (codeFrame) {
+    try { codeFrame.remove(); } catch {}
+    codeFrame = null;
+    termAppend('done', '── stopped ──');
+    $('run-code').classList.remove('hidden');
+    $('stop-code').classList.add('hidden');
+  }
+}
+
+function runCode() {
+  const code = $('code-input').value;
+  if (!code.trim()) return;
+  stopCode();
+  clearTerminal();
+  termAppend('prompt', '▶ run');
+
+  const harness = `
+    <!doctype html><html><body><script>
+      function fmt(a) {
+        if (a === null) return 'null';
+        if (a === undefined) return 'undefined';
+        if (typeof a === 'string') return a;
+        if (typeof a === 'number' || typeof a === 'boolean' || typeof a === 'bigint') return String(a);
+        try { return JSON.stringify(a, null, 2); } catch { return String(a); }
+      }
+      function send(type, level, text) { parent.postMessage({ type, level, text }, '*'); }
+      const make = (level) => (...a) => send('log', level, a.map(fmt).join(' '));
+      console.log   = make('log');
+      console.info  = make('info');
+      console.warn  = make('warn');
+      console.error = make('error');
+      window.onerror = (msg, src, line, col, err) => {
+        send('log', 'err', (err && err.stack) ? err.stack : (msg + ' at ' + line + ':' + col));
+        return true;
+      };
+      window.addEventListener('unhandledrejection', (e) => {
+        send('log', 'err', 'Unhandled rejection: ' + fmt(e.reason));
+      });
+      window.addEventListener('message', async (e) => {
+        if (e.data && e.data.type === 'exec') {
+          const src = e.data.code;
+          try {
+            const AsyncFn = (async function(){}).constructor;
+            const fn = new AsyncFn(src);
+            const result = await fn();
+            send('done', 'result', result === undefined ? '(no return value)' : fmt(result));
+          } catch (err) {
+            send('done', 'err', (err && err.stack) ? err.stack : String(err));
+          }
+        }
+      });
+      parent.postMessage({ type: 'ready' }, '*');
+    <\/script></body></html>`;
+
+  codeFrame = document.createElement('iframe');
+  codeFrame.style.display = 'none';
+  codeFrame.setAttribute('sandbox', 'allow-scripts');
+  codeFrame.srcdoc = harness;
+  document.body.appendChild(codeFrame);
+
+  const handler = (ev) => {
+    if (ev.source !== codeFrame?.contentWindow) return;
+    const m = ev.data;
+    if (m.type === 'ready') {
+      codeFrame.contentWindow.postMessage({ type: 'exec', code }, '*');
+    } else if (m.type === 'log') {
+      termAppend(m.level, m.text);
+    } else if (m.type === 'done') {
+      if (m.level === 'err') termAppend('err', m.text);
+      else termAppend('result', '← ' + m.text);
+      termAppend('done', '── done ──');
+      window.removeEventListener('message', handler);
+      try { codeFrame.remove(); } catch {}
+      codeFrame = null;
+      $('run-code').classList.remove('hidden');
+      $('stop-code').classList.add('hidden');
+    }
+  };
+  window.addEventListener('message', handler);
+  $('run-code').classList.add('hidden');
+  $('stop-code').classList.remove('hidden');
+}
+
+$('run-code').onclick = runCode;
+$('stop-code').onclick = stopCode;
+$('clear-terminal').onclick = clearTerminal;
+$('example-select').onchange = (e) => {
+  const v = e.target.value;
+  if (v && EXAMPLES[v]) {
+    $('code-input').value = EXAMPLES[v];
+    try { localStorage.setItem(CODE_KEY, EXAMPLES[v]); } catch {}
+    e.target.value = '';
+  }
+};
+$('open-code').onclick = () => switchScreen('code');
+$('send-code-ai').onclick = () => {
+  const code = $('code-input').value.trim();
+  const termText = Array.from($('terminal').children)
+    .map(n => n.textContent).join('\n');
+  if (!code) return;
+  const prompt =
+    "I'm running this JavaScript code:\n\n```js\n" + code + "\n```\n\n" +
+    (termText.trim() ? "Output:\n```\n" + termText + "\n```\n\n" : "") +
+    "Explain what it does, suggest improvements, or fix any bugs.";
+  addMessage('user', prompt);
+  switchScreen('chat');
+  Native.generate(buildPrompt(prompt));
+};
 
 // Initial render
 renderMessages();
