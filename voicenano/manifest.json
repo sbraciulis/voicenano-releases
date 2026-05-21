@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "0.7",
+  "versionCode": 8,
+  "versionName": "0.8",
   "apkUrl": "https://github.com/sbraciulis/voicenano-releases/releases/latest/download/voicenano.apk",
-  "notes": "Background downloads no longer block the chat. Switching models that aren't yet downloaded keeps your current model active and shows progress as a small banner. When the download finishes, a green Switch banner lets you hot-swap with one tap."
+  "notes": "WebView shell. UI now lives at github.io/voicenano-releases/app/index.html — future UI updates are git push only, no APK install needed. Compose UI replaced with HTML; JS bridge handles all native calls (STT, TTS, MediaPipe LLM, model mgmt, OTA)."
 }
