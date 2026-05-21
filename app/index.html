@@ -1090,10 +1090,18 @@ $('slash-btn').onclick = () => {
   t.selectionStart = t.selectionEnd = t.value.length;
   showSlashPopup(t.value.toLowerCase());
 };
-$('input').addEventListener('blur', () => {
-  // Delay so taps on popup items can fire first.
-  setTimeout(hideSlashPopup, 200);
-});
+
+// Hide the popup ONLY when the user taps somewhere outside the input wrap.
+// Blur-based hides were unreliable on mobile — Android touch sequences could
+// fire blur before our popup-item touchstart, killing the popup before selection.
+function onOutsideTap(e) {
+  if (!$('slash-popup').classList.contains('show')) return;
+  if (e.target.closest('.input-wrap')) return; // inside input area — keep popup
+  if (e.target.closest('#slash-btn'))  return; // explicit show button — keep popup
+  hideSlashPopup();
+}
+document.addEventListener('mousedown', onOutsideTap);
+document.addEventListener('touchstart', onOutsideTap, { passive: true });
 
 $('speak-switch').onclick = () => {
   if (!state) return;
