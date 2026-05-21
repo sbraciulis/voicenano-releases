@@ -778,13 +778,23 @@ function updateContextIndicator() {
 function applyState() {
   if (!state) return;
   const m = state.models.find(x => x.id === state.activeModelId);
-  $('model-line').textContent = state.modelReady ? `${m?.name || ''} · on-device` : (state.status || 'Loading…');
+  if (state.modelReady && !warm) {
+    $('model-line').textContent = `${m?.name || ''} · warming up…`;
+  } else {
+    $('model-line').textContent = state.modelReady ? `${m?.name || ''} · on-device` : (state.status || 'Loading…');
+  }
   $('status').textContent = state.status || '';
-  $('mic-btn').disabled = !state.modelReady;
+  const warm = isWarmedUp();
+  $('mic-btn').disabled = !(state.modelReady && warm);
   $('mic-btn').classList.toggle('listening', !!state.listening);
   $('mic-btn').textContent = state.listening ? '⏸' : '🎤';
   const inputVal = $('input').value.trim();
-  $('send-btn').disabled = !(state.modelReady && inputVal);
+  $('send-btn').disabled = !(state.modelReady && warm && inputVal);
+
+  // If we're in the warmup window, schedule a re-render to flip the button on.
+  if (state.modelReady && !warm) {
+    setTimeout(() => applyState(), Math.max(50, modelReadySince + WARMUP_MS - Date.now()));
+  }
 
   if (state.update) {
     $('update-banner').classList.remove('hidden');
@@ -915,8 +925,25 @@ function renderDiag() {
 }
 
 // ── Events ───────────────────────────────────────────────────────────
-on('onReady',  (p) => { state = p; applyState(); });
-on('onState',  (p) => { state = p; applyState(); });
+// Track when the engine flipped to ready, so we can hold off the very first
+// generateResponse() call until any lazy init / JIT is settled.
+let modelReadySince = 0;
+const WARMUP_MS = 1500;
+
+on('onReady',  (p) => {
+  state = p; if (state.modelReady && !modelReadySince) modelReadySince = Date.now();
+  applyState();
+});
+on('onState',  (p) => {
+  state = p;
+  if (state.modelReady && !modelReadySince) modelReadySince = Date.now();
+  if (!state.modelReady) modelReadySince = 0;
+  applyState();
+});
+
+function isWarmedUp() {
+  return modelReadySince && (Date.now() - modelReadySince) > WARMUP_MS;
+}
 on('onSttResult', (p) => {
   addMessage('user', p.text);
   Native.generate(buildPrompt());
@@ -924,11 +951,25 @@ on('onSttResult', (p) => {
 on('onSttError', (p) => {
   $('status').textContent = 'STT: ' + p.name + (p.message ? ` — ${p.message}` : '');
 });
+let generationTimeout = null;
+function clearGenerationGuard() {
+  if (generationTimeout) { clearTimeout(generationTimeout); generationTimeout = null; }
+}
+
 on('onGenerationStart', () => {
-  // Placeholder assistant bubble while generating
   addMessage('model', '…');
+  // Watchdog: if no result/error after 90s, surface a recoverable failure.
+  clearGenerationGuard();
+  generationTimeout = setTimeout(() => {
+    if (history.length && history[history.length - 1].text === '…') {
+      history[history.length - 1].text = '(no response after 90s — try a shorter prompt or tap /clear and retry)';
+      saveHistory();
+      renderMessages();
+    }
+  }, 90_000);
 });
 on('onGenerationDone', (p) => {
+  clearGenerationGuard();
   // Replace placeholder with real text
   if (history.length && history[history.length - 1].role === 'model' && history[history.length - 1].text === '…') {
     history[history.length - 1].text = p.text || '(no text)';
@@ -945,10 +986,12 @@ on('onGenerationDone', (p) => {
   if (state?.speakResponses && p.text) Native.speak(p.text);
 });
 on('onGenerationError', (p) => {
+  clearGenerationGuard();
   if (history.length && history[history.length - 1].role === 'model' && history[history.length - 1].text === '…') {
     history.pop();
+    saveHistory();
   }
-  addMessage('model', 'Error: ' + (p.message || 'unknown'));
+  addMessage('model', 'Error: ' + (p.message || 'unknown') + '\n\n(Tap your last message and edit, or /clear to reset.)');
 });
 on('onMicGranted', () => { $('status').textContent = 'Mic granted.'; });
 on('onMicDenied', () => { $('status').textContent = 'Mic denied. Open app settings.'; });
